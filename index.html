@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DCF Generator</title>
+</head>
+<body>
+  <h2>DCF Model Generator</h2>
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label>Consensus File (required):</label><br>
+    <input type="file" name="consensus" accept=".xlsx" required><br><br>
+
+    <label>Profile File (optional):</label><br>
+    <input type="file" name="profile" accept=".xlsx"><br><br>
+
+    <button type="submit">Generate DCF</button>
+  </form>
+
+  <a id="downloadLink" style="display:none;">Download DCF Model</a>
+
+  <script>
+    document.getElementById('uploadForm').onsubmit = async function (e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      const res = await fetch('http://localhost:8000/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        alert('Error generating DCF!');
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.getElementById('downloadLink');
+      link.href = url;
+      link.download = "DCF_Model.xlsx";
+      link.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
