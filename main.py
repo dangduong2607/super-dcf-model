@@ -1,10 +1,13 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-import openpyxl
+from openpyxl import load_workbook
 import shutil
 import os
+import logging
+
+# Enable logging
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
@@ -18,21 +21,23 @@ app.add_middleware(
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    # Save uploaded files
+    # Save consensus file
     consensus_path = "consensus.xlsx"
     with open(consensus_path, "wb") as f:
         shutil.copyfileobj(consensus.file, f)
 
+    # Save optional profile file
     profile_path = None
     if profile:
         profile_path = "profile.xlsx"
         with open(profile_path, "wb") as f:
             shutil.copyfileobj(profile.file, f)
 
-    # Generate the combined Excel file
+    # Build final output workbook
     output_path = "DCF_Model_Output.xlsx"
     build_final_excel(consensus_path, profile_path, output_path)
 
+    # Return response as a download
     return StreamingResponse(
         open(output_path, "rb"),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -40,21 +45,29 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     )
 
 def build_final_excel(consensus_path, profile_path, output_path):
-    with pd.ExcelWriter(output_path, engine='openpyxl', mode='w') as writer:
-        # Load all sheets from consensus
-        consensus_wb = pd.read_excel(consensus_path, sheet_name=None, engine="openpyxl")
-        for sheet, df in consensus_wb.items():
-            df.to_excel(writer, sheet_name=sheet, index=False)
+    # Step 1: Copy user's consensus as base file
+    shutil.copy(consensus_path, output_path)
 
-        # Add DCF Model sheet from template
-        template = pd.ExcelFile("Template.xlsx", engine="openpyxl")
-        dcf_model_df = template.parse("DCF Model")
-        dcf_model_df.to_excel(writer, sheet_name="DCF Model", index=False)
+    # Step 2: Open base workbook for editing
+    wb = load_workbook(output_path)
 
-        # Try to load Public Company sheet from profile, if uploaded
-        if profile_path and os.path.exists(profile_path):
-            try:
-                profile_df = pd.read_excel(profile_path, sheet_name="Public Company", engine="openpyxl")
-                profile_df.to_excel(writer, sheet_name="Public Company", index=False)
-            except Exception as e:
-                print(f"Skipping profile sheet due to error: {e}")
+    # Step 3: Append DCF Model from Template.xlsx
+    template_wb = load_workbook("Template.xlsx")
+    if "DCF Model" in template_wb.sheetnames:
+        dcf_sheet = template_wb["DCF Model"]
+        copied_dcf = wb.copy_worksheet(dcf_sheet)
+        copied_dcf.title = "DCF Model"
+
+    # Step 4: Append Public Company if available
+    if profile_path and os.path.exists(profile_path):
+        try:
+            profile_wb = load_workbook(profile_path)
+            if "Public Company" in profile_wb.sheetnames:
+                pub_sheet = profile_wb["Public Company"]
+                copied_pub = wb.copy_worksheet(pub_sheet)
+                copied_pub.title = "Public Company"
+        except Exception as e:
+            logging.warning(f"Skipping profile sheet due to error: {e}")
+
+    # Step 5: Save updated workbook
+    wb.save(output_path)
