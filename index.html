@@ -2,43 +2,108 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DCF Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DCF Valuation Generator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Inter', sans-serif;
+    }
+    body {
+      background: #f0f4f8;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      background: #fff;
+      padding: 30px 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      max-width: 500px;
+      width: 100%;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      font-size: 24px;
+      margin-bottom: 24px;
+    }
+    label {
+      font-weight: 600;
+      margin-top: 20px;
+      display: block;
+    }
+    input[type="file"] {
+      margin-top: 8px;
+      width: 100%;
+      padding: 8px;
+    }
+    button {
+      margin-top: 30px;
+      width: 100%;
+      padding: 12px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #downloadLink {
+      display: none;
+      margin-top: 20px;
+      text-align: center;
+      font-weight: 600;
+      color: #007BFF;
+    }
+  </style>
 </head>
 <body>
-  <h2>DCF Model Generator</h2>
-  <form id="uploadForm" enctype="multipart/form-data">
-    <label>Consensus File (required):</label><br>
-    <input type="file" name="consensus" accept=".xlsx" required><br><br>
+  <div class="container">
+    <h1>DCF Valuation Generator</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+      <label for="consensus">Consensus File (required)</label>
+      <input type="file" name="consensus" accept=".xlsx" required>
 
-    <label>Profile File (optional):</label><br>
-    <input type="file" name="profile" accept=".xlsx"><br><br>
+      <label for="profile">Profile File (optional)</label>
+      <input type="file" name="profile" accept=".xlsx">
 
-    <button type="submit">Generate DCF</button>
-  </form>
+      <button type="submit">Generate DCF Model</button>
+    </form>
 
-  <a id="downloadLink" style="display:none;">Download DCF Model</a>
+    <a id="downloadLink">Download DCF Model</a>
+  </div>
 
   <script>
-    document.getElementById('uploadForm').onsubmit = async function (e) {
+    document.getElementById('uploadForm').onsubmit = async function(e) {
       e.preventDefault();
       const formData = new FormData(this);
-      const res = await fetch('http://localhost:8000/upload', {
+
+      const response = await fetch('http://localhost:8000/upload', {
         method: 'POST',
         body: formData
       });
 
-      if (!res.ok) {
-        alert('Error generating DCF!');
+      if (!response.ok) {
+        alert('Something went wrong!');
         return;
       }
 
-      const blob = await res.blob();
+      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
-      const link = document.getElementById('downloadLink');
-      link.href = url;
-      link.download = "DCF_Model.xlsx";
-      link.style.display = 'block';
+      const downloadLink = document.getElementById('downloadLink');
+      downloadLink.href = url;
+      downloadLink.download = "DCF_Model.xlsx";
+      downloadLink.style.display = 'block';
     }
   </script>
 </body>
