@@ -1,13 +1,10 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 import shutil
 import os
-import logging
-
-# Enable logging
-logging.basicConfig(level=logging.INFO)
+import io
 
 app = FastAPI()
 
@@ -21,53 +18,75 @@ app.add_middleware(
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    # Save consensus file
     consensus_path = "consensus.xlsx"
     with open(consensus_path, "wb") as f:
         shutil.copyfileobj(consensus.file, f)
 
-    # Save optional profile file
     profile_path = None
     if profile:
         profile_path = "profile.xlsx"
         with open(profile_path, "wb") as f:
             shutil.copyfileobj(profile.file, f)
 
-    # Build final output workbook
-    output_path = "DCF_Model_Output.xlsx"
-    build_final_excel(consensus_path, profile_path, output_path)
-
-    # Return response as a download
+    output_stream = build_final_excel(consensus_path, profile_path)
     return StreamingResponse(
-        open(output_path, "rb"),
+        output_stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
     )
 
-def build_final_excel(consensus_path, profile_path, output_path):
-    # Step 1: Copy user's consensus as base file
-    shutil.copy(consensus_path, output_path)
+def copy_sheet_contents(source, target):
+    # Copy cell values, styles, and formulas
+    for row in source.iter_rows():
+        for cell in row:
+            new_cell = target.cell(row=cell.row, column=cell.column, value=cell.value)
+            if cell.has_style:
+                new_cell._style = cell._style
+            if cell.hyperlink:
+                new_cell.hyperlink = cell.hyperlink
+            if cell.comment:
+                new_cell.comment = cell.comment
 
-    # Step 2: Open base workbook for editing
-    wb = load_workbook(output_path)
+    # Copy column widths
+    for col_letter, dim in source.column_dimensions.items():
+        target.column_dimensions[col_letter].width = dim.width
 
-    # Step 3: Append DCF Model from Template.xlsx
-    template_wb = load_workbook("Template.xlsx")
-    if "DCF Model" in template_wb.sheetnames:
-        dcf_sheet = template_wb["DCF Model"]
-        copied_dcf = wb.copy_worksheet(dcf_sheet)
-        copied_dcf.title = "DCF Model"
+    # Copy row heights
+    for row_num, dim in source.row_dimensions.items():
+        target.row_dimensions[row_num].height = dim.height
 
-    # Step 4: Append Public Company if available
+    # Copy merged cells
+    for merged_range in source.merged_cells.ranges:
+        target.merge_cells(str(merged_range))
+
+def build_final_excel(consensus_path, profile_path):
+    # Load user's uploaded consensus workbook
+    wb = load_workbook(consensus_path)
+
+    # Load template and DCF Model sheet
+    template_wb = load_workbook("Template.xlsx", data_only=False)
+    dcf_sheet_template = template_wb["DCF Model"]
+
+    # Create a new sheet and copy DCF Model contents into it
+    if "DCF Model" in wb.sheetnames:
+        del wb["DCF Model"]
+    new_dcf = wb.create_sheet("DCF Model")
+    copy_sheet_contents(dcf_sheet_template, new_dcf)
+
+    # If profile provided, copy Public Company sheet
     if profile_path and os.path.exists(profile_path):
         try:
-            profile_wb = load_workbook(profile_path)
+            profile_wb = load_workbook(profile_path, data_only=False)
             if "Public Company" in profile_wb.sheetnames:
-                pub_sheet = profile_wb["Public Company"]
-                copied_pub = wb.copy_worksheet(pub_sheet)
-                copied_pub.title = "Public Company"
+                if "Public Company" in wb.sheetnames:
+                    del wb["Public Company"]
+                new_profile = wb.create_sheet("Public Company")
+                copy_sheet_contents(profile_wb["Public Company"], new_profile)
         except Exception as e:
-            logging.warning(f"Skipping profile sheet due to error: {e}")
+            print(f"Skipping profile copy due to error: {e}")
 
-    # Step 5: Save updated workbook
-    wb.save(output_path)
+    # Save result to in-memory stream
+    output_stream = io.BytesIO()
+    wb.save(output_stream)
+    output_stream.seek(0)
+    return output_stream
