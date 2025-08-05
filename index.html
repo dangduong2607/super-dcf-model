@@ -74,7 +74,7 @@
       <label for="consensus">Consensus File (required)</label>
       <input type="file" name="consensus" accept=".xlsx" required>
 
-      <label for="profile">Corporate Profile File (optional)</label>
+      <label for="profile">Profile File (optional)</label>
       <input type="file" name="profile" accept=".xlsx">
 
       <button type="submit">Generate DCF Model</button>
@@ -88,7 +88,7 @@
       e.preventDefault();
       const formData = new FormData(this);
 
-      const response = await fetch('http://localhost:8000/upload', {
+      const response = await fetch('https://dcf-backend-hjku.onrender.com/upload', {
         method: 'POST',
         body: formData
       });
