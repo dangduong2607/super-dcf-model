@@ -2,7 +2,6 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 import shutil
 import os
 from tempfile import NamedTemporaryFile
@@ -18,36 +17,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def copy_range(source_sheet, target_sheet, range_str="A1:T500"):
+def copy_sheet(source_sheet, target_wb, target_sheet_name):
     """
-    Copies cells from source_sheet to target_sheet within the specified range.
-    Handles values, formulas, styles, and formatting.
+    Copies an entire sheet from source to target workbook while preserving formulas and references
     """
-    # Parse range (simplified for A1:T500 case)
-    start_col, start_row = 1, 1  # A1
-    end_col, end_row = 20, 500   # T500
-
-    for row in range(start_row, end_row + 1):
-        for col in range(start_col, end_col + 1):
-            # Get source cell
-            source_cell = source_sheet.cell(row=row, column=col)
-            
-            # Get target cell and copy everything
-            target_cell = target_sheet.cell(row=row, column=col, value=source_cell.value)
-            
-            # Copy style if exists
-            if source_cell.has_style:
-                target_cell.font = source_cell.font.copy()
-                target_cell.border = source_cell.border.copy()
-                target_cell.fill = source_cell.fill.copy()
-                target_cell.number_format = source_cell.number_format
-                target_cell.protection = source_cell.protection.copy()
-                target_cell.alignment = source_cell.alignment.copy()
-
-            # Copy hyperlinks if exists
-            if source_cell.hyperlink:
-                target_cell.hyperlink = source_cell.hyperlink
-                target_cell.style = "Hyperlink"
+    # Create new sheet in target workbook
+    new_sheet = target_wb.create_sheet(target_sheet_name)
+    
+    # Copy all cells including values, formulas, styles, and formatting
+    for row in source_sheet.iter_rows():
+        for cell in row:
+            new_cell = new_sheet.cell(row=cell.row, column=cell.column, 
+                                    value=cell.value)
+            if cell.has_style:
+                new_cell.font = cell.font.copy()
+                new_cell.border = cell.border.copy()
+                new_cell.fill = cell.fill.copy()
+                new_cell.number_format = cell.number_format
+                new_cell.protection = cell.protection.copy()
+                new_cell.alignment = cell.alignment.copy()
+            if cell.hyperlink:
+                new_cell.hyperlink = cell.hyperlink
+                new_cell.style = "Hyperlink"
+    
+    # Copy merged cells
+    for merged_cell_range in source_sheet.merged_cells.ranges:
+        new_sheet.merge_cells(str(merged_cell_range))
+    
+    # Copy column dimensions
+    for col, dimension in source_sheet.column_dimensions.items():
+        new_sheet.column_dimensions[col].width = dimension.width
+        new_sheet.column_dimensions[col].hidden = dimension.hidden
+    
+    # Copy row dimensions
+    for row, dimension in source_sheet.row_dimensions.items():
+        new_sheet.row_dimensions[row].height = dimension.height
+        new_sheet.row_dimensions[row].hidden = dimension.hidden
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
@@ -58,7 +63,7 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
             consensus_path = temp_consensus.name
 
         # Load the consensus file
-        consensus_wb = load_workbook(consensus_path)
+        consensus_wb = load_workbook(consensus_path, data_only=False)  # Important: data_only=False to preserve formulas
         
         # If profile file is provided, add its Public Company data
         if profile:
@@ -66,38 +71,34 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
                 shutil.copyfileobj(profile.file, temp_profile)
                 profile_path = temp_profile.name
             
-            profile_wb = load_workbook(profile_path)
+            profile_wb = load_workbook(profile_path, data_only=False)
             if "Public Company" in profile_wb.sheetnames:
-                profile_sheet = profile_wb["Public Company"]
-                
                 # Remove existing sheet if present
                 if "Public Company" in consensus_wb.sheetnames:
                     consensus_wb.remove(consensus_wb["Public Company"])
                 
-                # Create new sheet and copy A1:T500
-                new_profile_sheet = consensus_wb.create_sheet("Public Company")
-                copy_range(profile_sheet, new_profile_sheet)
+                # Copy the entire Public Company sheet
+                copy_sheet(profile_wb["Public Company"], consensus_wb, "Public Company")
             
             os.unlink(profile_path)
 
         # Load the template
-        template = load_workbook("Template.xlsx")
-        template_dcf_sheet = template["DCF Model"]
+        template = load_workbook("Template.xlsx", data_only=False)
         
         # Remove existing DCF Model sheet if it exists
         if "DCF Model" in consensus_wb.sheetnames:
             consensus_wb.remove(consensus_wb["DCF Model"])
         
-        # Create new DCF Model sheet and copy A1:T500
-        new_dcf_sheet = consensus_wb.create_sheet("DCF Model")
-        copy_range(template_dcf_sheet, new_dcf_sheet)
+        # Copy the entire DCF Model sheet from template
+        copy_sheet(template["DCF Model"], consensus_wb, "DCF Model")
         
         # Update valuation date
-        update_valuation_date(new_dcf_sheet)
+        update_valuation_date(consensus_wb["DCF Model"])
         
         # Save to temporary output file
         temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
         consensus_wb.save(temp_output.name)
+        consensus_wb.close()
         
         return StreamingResponse(
             open(temp_output.name, "rb"),
