@@ -1,108 +1,178 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-import openpyxl
-import shutil
-import os
-from copy import copy
+<!-- Updated frontend with better error handling -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DCF Valuation Generator</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Inter', sans-serif;
+    }
+    body {
+      background: #f0f4f8;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      background: #fff;
+      padding: 30px 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+      max-width: 500px;
+      width: 100%;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      font-size: 24px;
+      margin-bottom: 24px;
+    }
+    label {
+      font-weight: 600;
+      margin-top: 20px;
+      display: block;
+    }
+    input[type="file"] {
+      margin-top: 8px;
+      width: 100%;
+      padding: 8px;
+    }
+    button {
+      margin-top: 30px;
+      width: 100%;
+      padding: 12px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #downloadLink {
+      display: none;
+      margin-top: 20px;
+      text-align: center;
+      font-weight: 600;
+      color: #007BFF;
+    }
+    #statusMessage {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 8px;
+      text-align: center;
+      display: none;
+    }
+    .error {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+    .success {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(0,0,0,.3);
+      border-radius: 50%;
+      border-top-color: #007BFF;
+      animation: spin 1s ease-in-out infinite;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>DCF Valuation Generator</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+      <label for="consensus">Consensus File (required)</label>
+      <input type="file" name="consensus" accept=".xlsx" required>
 
-app = FastAPI()
+      <label for="profile">Corporate Profile File (optional)</label>
+      <input type="file" name="profile" accept=".xlsx">
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+      <button type="submit" id="submitBtn">
+        <span id="submitText">Generate DCF Model</span>
+        <span id="loadingSpinner" style="display:none;" class="loading"></span>
+      </button>
+    </form>
 
-@app.post("/upload")
-async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    # Save uploaded files
-    consensus_path = "consensus.xlsx"
-    with open(consensus_path, "wb") as f:
-        shutil.copyfileobj(consensus.file, f)
+    <div id="statusMessage"></div>
+    <a id="downloadLink">Download DCF Model</a>
+  </div>
 
-    profile_path = None
-    if profile:
-        profile_path = "profile.xlsx"
-        with open(profile_path, "wb") as f:
-            shutil.copyfileobj(profile.file, f)
+  <script>
+    document.getElementById('uploadForm').onsubmit = async function(e) {
+      e.preventDefault();
+      
+      // Show loading state
+      const submitBtn = document.getElementById('submitBtn');
+      const submitText = document.getElementById('submitText');
+      const loadingSpinner = document.getElementById('loadingSpinner');
+      const statusMessage = document.getElementById('statusMessage');
+      
+      submitBtn.disabled = true;
+      submitText.textContent = "Processing...";
+      loadingSpinner.style.display = 'inline-block';
+      statusMessage.style.display = 'none';
+      
+      try {
+        const formData = new FormData(this);
+        const response = await fetch('https://dcf-backend-hjku.onrender.com/upload', {
+          method: 'POST',
+          body: formData
+        });
 
-    # Generate the combined Excel file
-    output_path = "DCF_Model_Output.xlsx"
-    build_final_excel(consensus_path, profile_path, output_path)
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Server error');
+        }
 
-    return StreamingResponse(
-        open(output_path, "rb"),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
-    )
-
-def build_final_excel(consensus_path, profile_path, output_path):
-    # Helper function to copy sheets with full fidelity
-    def copy_sheet(source_sheet, target_wb, sheet_name):
-        new_sheet = target_wb.create_sheet(sheet_name)
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const downloadLink = document.getElementById('downloadLink');
         
-        # Copy cells with values and formatting
-        for row in source_sheet.iter_rows():
-            for cell in row:
-                new_cell = new_sheet.cell(
-                    row=cell.row, 
-                    column=cell.column, 
-                    value=cell.value
-                )
-                if cell.has_style:
-                    new_cell.font = copy(cell.font)
-                    new_cell.border = copy(cell.border)
-                    new_cell.fill = copy(cell.fill)
-                    new_cell.number_format = cell.number_format
-                    new_cell.protection = copy(cell.protection)
-                    new_cell.alignment = copy(cell.alignment)
+        downloadLink.href = url;
+        downloadLink.download = "DCF_Model.xlsx";
+        downloadLink.textContent = "Download DCF Model";
+        downloadLink.style.display = 'block';
         
-        # Copy column dimensions
-        for col_letter, col_dim in source_sheet.column_dimensions.items():
-            new_col_dim = new_sheet.column_dimensions[col_letter]
-            new_col_dim.width = col_dim.width
-            new_col_dim.hidden = col_dim.hidden
+        // Show success message
+        statusMessage.textContent = "File generated successfully!";
+        statusMessage.className = "success";
+        statusMessage.style.display = 'block';
         
-        # Copy row dimensions
-        for row_idx, row_dim in source_sheet.row_dimensions.items():
-            new_row_dim = new_sheet.row_dimensions[row_idx]
-            new_row_dim.height = row_dim.height
-            new_row_dim.hidden = row_dim.hidden
+      } catch (error) {
+        console.error('Error:', error);
         
-        # Copy merged cells
-        for merged_range in source_sheet.merged_cells.ranges:
-            new_sheet.merge_cells(str(merged_range))
+        // Show error message
+        statusMessage.textContent = `Error: ${error.message || 'Failed to generate file'}`;
+        statusMessage.className = "error";
+        statusMessage.style.display = 'block';
         
-        return new_sheet
-
-    # Start with consensus workbook as base
-    wb = openpyxl.load_workbook(consensus_path)
-
-    # Add Public Company sheet from profile if available
-    if profile_path and os.path.exists(profile_path):
-        profile_wb = openpyxl.load_workbook(profile_path)
-        if "Public Company" in profile_wb.sheetnames:
-            # Remove existing sheet if present
-            if "Public Company" in wb.sheetnames:
-                del wb["Public Company"]
-            source_sheet = profile_wb["Public Company"]
-            copy_sheet(source_sheet, wb, "Public Company")
-
-    # Add DCF Model from template
-    template_wb = openpyxl.load_workbook("Template.xlsx")
-    if "DCF Model" in template_wb.sheetnames:
-        # Remove existing sheet if present
-        if "DCF Model" in wb.sheetnames:
-            del wb["DCF Model"]
-        
-        source_sheet = template_wb["DCF Model"]
-        dcf_sheet = copy_sheet(source_sheet, wb, "DCF Model")
-        
-        # Turn off gridlines for cleaner look
-        dcf_sheet.sheet_view.showGridLines = False
-
-    # Save the final workbook
-    wb.save(output_path)
+      } finally {
+        // Reset button state
+        submitBtn.disabled = false;
+        submitText.textContent = "Generate DCF Model";
+        loadingSpinner.style.display = 'none';
+      }
+    }
+  </script>
+</body>
+</html>
