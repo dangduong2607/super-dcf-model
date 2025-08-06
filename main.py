@@ -5,6 +5,7 @@ from openpyxl import load_workbook
 import shutil
 import os
 from tempfile import NamedTemporaryFile
+import traceback
 
 app = FastAPI()
 
@@ -16,25 +17,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def copy_sheet(source_sheet, target_wb, sheet_name):
+def copy_sheet(source_wb, target_wb, sheet_name):
     """Copy a sheet with all content and formatting to target workbook"""
-    # Create new sheet
+    if sheet_name not in source_wb.sheetnames:
+        return False
+    
+    source_sheet = source_wb[sheet_name]
     new_sheet = target_wb.create_sheet(sheet_name)
     
-    # Copy all cell values and formatting
+    # Copy cell values and formatting
     for row in source_sheet.iter_rows():
         for cell in row:
-            new_cell = new_sheet.cell(
-                row=cell.row, 
-                column=cell.column,
-                value=cell.value
-            )
+            new_cell = new_sheet.cell(row=cell.row, column=cell.column, value=cell.value)
             if cell.has_style:
                 new_cell.font = cell.font.copy()
                 new_cell.border = cell.border.copy()
                 new_cell.fill = cell.fill.copy()
                 new_cell.number_format = cell.number_format
-                new_cell.protection = cell.protection.copy()
                 new_cell.alignment = cell.alignment.copy()
     
     # Copy merged cells
@@ -42,76 +41,74 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
         new_sheet.merge_cells(str(merged_range))
     
     # Copy column dimensions
-    for col_idx, col_dim in source_sheet.column_dimensions.items():
-        if col_dim.width is not None:
-            new_sheet.column_dimensions[col_idx].width = col_dim.width
-        new_sheet.column_dimensions[col_idx].hidden = col_dim.hidden
+    for col in source_sheet.column_dimensions:
+        target_col = new_sheet.column_dimensions[col]
+        source_col = source_sheet.column_dimensions[col]
+        target_col.width = source_col.width
+        target_col.hidden = source_col.hidden
     
     # Copy row dimensions
-    for row_idx, row_dim in source_sheet.row_dimensions.items():
-        if row_dim.height is not None:
-            new_sheet.row_dimensions[row_idx].height = row_dim.height
-        new_sheet.row_dimensions[row_idx].hidden = row_dim.hidden
+    for row_idx in source_sheet.row_dimensions:
+        target_row = new_sheet.row_dimensions[row_idx]
+        source_row = source_sheet.row_dimensions[row_idx]
+        target_row.height = source_row.height
+        target_row.hidden = source_row.hidden
+    
+    return True
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    consensus_path = None
-    profile_path = None
-    temp_output = None
+    consensus_temp = None
+    profile_temp = None
+    output_temp = None
     
     try:
         # Save consensus file
-        with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_consensus:
-            shutil.copyfileobj(consensus.file, temp_consensus)
-            consensus_path = temp_consensus.name
-
+        consensus_temp = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        shutil.copyfileobj(consensus.file, consensus_temp)
+        consensus_temp.close()
+        
         # Save profile file if provided
         if profile:
-            with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_profile:
-                shutil.copyfileobj(profile.file, temp_profile)
-                profile_path = temp_profile.name
+            profile_temp = NamedTemporaryFile(delete=False, suffix=".xlsx")
+            shutil.copyfileobj(profile.file, profile_temp)
+            profile_temp.close()
 
-        # Create output workbook from template
-        output_wb = load_workbook("Template.xlsx")
-        
-        # Remove all sheets except DCF Model
-        for sheet_name in output_wb.sheetnames[:]:
+        # Load template and keep only DCF Model sheet
+        template = load_workbook("Template.xlsx")
+        for sheet_name in template.sheetnames[:]:
             if sheet_name != "DCF Model":
-                output_wb.remove(output_wb[sheet_name])
+                del template[sheet_name]
         
-        # Add consensus sheet
-        consensus_wb = load_workbook(consensus_path)
-        if "Consensus" not in consensus_wb.sheetnames:
+        # Copy Consensus sheet
+        consensus_wb = load_workbook(consensus_temp.name)
+        if not copy_sheet(consensus_wb, template, "Consensus"):
             raise HTTPException(status_code=400, detail="Consensus file must contain 'Consensus' sheet")
-        copy_sheet(consensus_wb["Consensus"], output_wb, "Consensus")
         
-        # Add profile sheet if provided
-        if profile_path:
-            profile_wb = load_workbook(profile_path)
-            if "Public Company" not in profile_wb.sheetnames:
+        # Copy Public Company sheet if provided
+        if profile_temp:
+            profile_wb = load_workbook(profile_temp.name)
+            if not copy_sheet(profile_wb, template, "Public Company"):
                 raise HTTPException(status_code=400, detail="Profile file must contain 'Public Company' sheet")
-            copy_sheet(profile_wb["Public Company"], output_wb, "Public Company")
+
+        # Save output to temporary file
+        output_temp = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        template.save(output_temp.name)
         
-        # Save to temporary file
-        temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
-        output_wb.save(temp_output.name)
-        
-        # Return the generated file
+        # Return generated file
         return StreamingResponse(
-            open(temp_output.name, "rb"),
+            open(output_temp.name, "rb"),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
         )
 
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing files: {str(e)}")
-    
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
     finally:
-        # Clean up temporary files
-        for path in [consensus_path, profile_path]:
-            if path and os.path.exists(path):
-                os.unlink(path)
-        if temp_output and os.path.exists(temp_output.name):
-            os.unlink(temp_output.name)
+        # Cleanup temporary files
+        for temp_file in [consensus_temp, profile_temp, output_temp]:
+            if temp_file and os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
