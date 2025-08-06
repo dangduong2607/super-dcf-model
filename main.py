@@ -8,7 +8,6 @@ import os
 
 app = FastAPI()
 
-# Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,32 +23,37 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     with open(consensus_path, "wb") as f:
         shutil.copyfileobj(consensus.file, f)
 
-    # Save profile file if uploaded
+    # Save uploaded profile file if provided
     profile_path = None
     if profile:
         profile_path = "profile.xlsx"
         with open(profile_path, "wb") as f:
             shutil.copyfileobj(profile.file, f)
 
-    # Generate final Excel file
+    # Generate the combined output Excel file
     output_path = "DCF_Model_Output.xlsx"
     build_final_excel(consensus_path, profile_path, output_path)
 
     return FileResponse(output_path, filename="DCF_Model.xlsx")
 
+
 def build_final_excel(consensus_path, profile_path, output_path):
+    # Write to new Excel workbook
     with pd.ExcelWriter(output_path, engine='openpyxl', mode='w') as writer:
-        # Load and write all sheets from consensus file
+        # Load and copy all sheets from the consensus file
         consensus_wb = pd.read_excel(consensus_path, sheet_name=None, engine='openpyxl')
         for sheet, df in consensus_wb.items():
             df.to_excel(writer, sheet_name=sheet, index=False)
 
-        # Load and write the DCF Model sheet from Template.xlsx
-        template = pd.ExcelFile("Template.xlsx", engine='openpyxl')
+        # Append "DCF Model" sheet from Template.xlsx
+        template = pd.ExcelFile("Template.xlsx", engine="openpyxl")
         dcf_model_df = template.parse("DCF Model")
         dcf_model_df.to_excel(writer, sheet_name="DCF Model", index=False)
 
-        # Load and write Public Company sheet if profile file is present
+        # Append "Public Company" sheet only if profile is provided and valid
         if profile_path and os.path.exists(profile_path):
-            profile_df = pd.read_excel(profile_path, sheet_name="Public Company", engine='openpyxl')
-            profile_df.to_excel(writer, sheet_name="Public Company", index=False)
+            try:
+                profile_df = pd.read_excel(profile_path, sheet_name="Public Company", engine="openpyxl")
+                profile_df.to_excel(writer, sheet_name="Public Company", index=False)
+            except Exception as e:
+                print(f"Skipping profile sheet due to error: {e}")
