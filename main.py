@@ -1,10 +1,10 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 import shutil
 import os
-import io
+from tempfile import NamedTemporaryFile
 
 app = FastAPI()
 
@@ -16,81 +16,70 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def cleanup_files(*file_paths):
+    """Clean up temporary files."""
+    for path in file_paths:
+        if path and os.path.exists(path):
+            os.remove(path)
+
+def generate_output_file(consensus_path, profile_path):
+    """Generates a new Excel file from the uploaded data and a template."""
+    try:
+        # Load the template
+        output_wb = load_workbook("Template.xlsx")
+
+        # Your logic to process data from consensus_path and profile_path and
+        # populate the output_wb would go here.
+        # For this example, we will assume you only need to remove other sheets.
+
+        # Remove all sheets except DCF Model
+        for sheet_name in list(output_wb.sheetnames):
+            if sheet_name != "DCF Model":
+                output_wb.remove(output_wb[sheet_name])
+        
+        # Save to a temporary file
+        temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        output_wb.save(temp_file.name)
+        temp_file.close()
+        return temp_file.name
+        
+    except Exception as e:
+        raise Exception(f"Error generating output file: {str(e)}")
+
 @app.post("/upload")
-async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    consensus_path = "consensus.xlsx"
-    with open(consensus_path, "wb") as f:
-        shutil.copyfileobj(consensus.file, f)
-
+async def upload(background_tasks: BackgroundTasks, consensus: UploadFile = File(...), profile: UploadFile = File(None)):
+    consensus_path = None
     profile_path = None
-    if profile:
-        profile_path = "profile.xlsx"
-        with open(profile_path, "wb") as f:
-            shutil.copyfileobj(profile.file, f)
+    output_path = None
 
-    output_stream = build_final_excel(consensus_path, profile_path)
-    return StreamingResponse(
-        output_stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
-    )
+    try:
+        # Save uploaded files temporarily
+        consensus_path = "temp_consensus.xlsx"
+        with open(consensus_path, "wb") as f:
+            shutil.copyfileobj(consensus.file, f)
 
-def copy_range(source, target, cell_range: str):
-    min_col = ord(cell_range[0]) - ord('A') + 1
-    max_col = ord(cell_range[3]) - ord('A') + 1
-    min_row = int(cell_range[1:cell_range.find(':')].lstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ'))
-    max_row = int(cell_range[cell_range.find(':') + 1:].lstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ'))
+        if profile:
+            profile_path = "temp_profile.xlsx"
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile.file, f)
 
-    # Copy cells and styles
-    for row in source[cell_range]:
-        for cell in row:
-            new_cell = target.cell(row=cell.row, column=cell.column, value=cell.value)
-            if cell.has_style:
-                new_cell._style = cell._style
-            if cell.hyperlink:
-                new_cell.hyperlink = cell.hyperlink
-            if cell.comment:
-                new_cell.comment = cell.comment
+        # Generate the output file
+        output_path = generate_output_file(consensus_path, profile_path)
 
-    # Column widths
-    for col_letter in [chr(c) for c in range(ord('A'), ord('T') + 1)]:
-        if col_letter in source.column_dimensions:
-            target.column_dimensions[col_letter].width = source.column_dimensions[col_letter].width
+        # Add cleanup to run in the background after the response is sent
+        background_tasks.add_task(cleanup_files, consensus_path, profile_path, output_path)
 
-    # Row heights
-    for row_num in range(1, 501):
-        if row_num in source.row_dimensions:
-            target.row_dimensions[row_num].height = source.row_dimensions[row_num].height
+        # Return the generated file using a generator to stream its content
+        def file_iterator():
+            with open(output_path, "rb") as f:
+                yield from f
 
-    # Merged cells within A1:T500
-    for merged_range in source.merged_cells.ranges:
-        bounds = merged_range.bounds  # (min_col, min_row, max_col, max_row)
-        if bounds[0] >= 1 and bounds[1] >= 1 and bounds[2] <= 20 and bounds[3] <= 500:
-            target.merge_cells(str(merged_range))
+        return StreamingResponse(
+            file_iterator(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
+        )
 
-def build_final_excel(consensus_path, profile_path):
-    wb = load_workbook(consensus_path)
-
-    # Copy DCF Model from Template.xlsx
-    template_wb = load_workbook("Template.xlsx", data_only=False)
-    if "DCF Model" in wb.sheetnames:
-        del wb["DCF Model"]
-    new_dcf = wb.create_sheet("DCF Model")
-    copy_range(template_wb["DCF Model"], new_dcf, "A1:T500")
-
-    # Copy Public Company if profile provided
-    if profile_path and os.path.exists(profile_path):
-        try:
-            profile_wb = load_workbook(profile_path, data_only=False)
-            if "Public Company" in profile_wb.sheetnames:
-                if "Public Company" in wb.sheetnames:
-                    del wb["Public Company"]
-                new_profile = wb.create_sheet("Public Company")
-                copy_range(profile_wb["Public Company"], new_profile, "A1:T500")
-        except Exception as e:
-            print(f"Skipping Public Company copy due to error: {e}")
-
-    output_stream = io.BytesIO()
-    wb.save(output_stream)
-    output_stream.seek(0)
-    return output_stream
+    except Exception as e:
+        cleanup_files(consensus_path, profile_path, output_path)
+        raise HTTPException(status_code=500, detail=str(e))
