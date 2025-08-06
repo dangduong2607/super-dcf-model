@@ -1,11 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from openpyxl import load_workbook
+import openpyxl
 import shutil
 import os
-from tempfile import NamedTemporaryFile
-from datetime import datetime
+from copy import copy
 
 app = FastAPI()
 
@@ -19,125 +18,91 @@ app.add_middleware(
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    consensus_path = None
-    temp_output = None
-    
-    try:
-        # Create temporary files
-        with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_consensus:
-            shutil.copyfileobj(consensus.file, temp_consensus)
-            consensus_path = temp_consensus.name
+    # Save uploaded files
+    consensus_path = "consensus.xlsx"
+    with open(consensus_path, "wb") as f:
+        shutil.copyfileobj(consensus.file, f)
 
-        # Load the consensus file
-        consensus_wb = load_workbook(consensus_path)
-        
-        # If profile file is provided, add it to the workbook
-        if profile and profile.filename:  # Check if file was actually uploaded
-            with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_profile:
-                shutil.copyfileobj(profile.file, temp_profile)
-                profile_path = temp_profile.name
-            
-            profile_wb = load_workbook(profile_path)
-            if "Public Company" in profile_wb.sheetnames:
-                profile_sheet = profile_wb["Public Company"]
-                if "Public Company" in consensus_wb.sheetnames:
-                    consensus_wb.remove(consensus_wb["Public Company"])
-                new_profile_sheet = consensus_wb.create_sheet("Public Company")
-                
-                # Copy all content from profile sheet
-                for row in profile_sheet.iter_rows():
-                    for cell in row:
-                        new_cell = new_profile_sheet.cell(
-                            row=cell.row, 
-                            column=cell.column,
-                            value=cell.value
-                        )
-                        if cell.has_style:
-                            new_cell.font = cell.font.copy()
-                            new_cell.border = cell.border.copy()
-                            new_cell.fill = cell.fill.copy()
-                            new_cell.number_format = cell.number_format
-                            new_cell.protection = cell.protection.copy()
-                            new_cell.alignment = cell.alignment.copy()
-            
-            os.unlink(profile_path)
+    profile_path = None
+    if profile:
+        profile_path = "profile.xlsx"
+        with open(profile_path, "wb") as f:
+            shutil.copyfileobj(profile.file, f)
 
-        # Load the template
-        template = load_workbook("Template.xlsx")
+    # Generate the combined Excel file
+    output_path = "DCF_Model_Output.xlsx"
+    build_final_excel(consensus_path, profile_path, output_path)
+
+    return StreamingResponse(
+        open(output_path, "rb"),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
+    )
+
+def build_final_excel(consensus_path, profile_path, output_path):
+    # Helper function to copy sheets with full fidelity
+    def copy_sheet(source_sheet, target_wb, sheet_name):
+        new_sheet = target_wb.create_sheet(sheet_name)
         
-        # Remove existing DCF Model sheet if it exists
-        if "DCF Model" in consensus_wb.sheetnames:
-            consensus_wb.remove(consensus_wb["DCF Model"])
-        
-        # Copy DCF Model sheet from template to consensus workbook
-        dcf_sheet = template["DCF Model"]
-        new_sheet = consensus_wb.create_sheet("DCF Model")
-        
-        # Copy all cells including values, styles, and formulas
-        for row in dcf_sheet.iter_rows():
+        # Copy cells with values and formatting
+        for row in source_sheet.iter_rows():
             for cell in row:
                 new_cell = new_sheet.cell(
                     row=cell.row, 
-                    column=cell.column,
+                    column=cell.column, 
                     value=cell.value
                 )
                 if cell.has_style:
-                    new_cell.font = cell.font.copy()
-                    new_cell.border = cell.border.copy()
-                    new_cell.fill = cell.fill.copy()
+                    new_cell.font = copy(cell.font)
+                    new_cell.border = copy(cell.border)
+                    new_cell.fill = copy(cell.fill)
                     new_cell.number_format = cell.number_format
-                    new_cell.protection = cell.protection.copy()
-                    new_cell.alignment = cell.alignment.copy()
-        
-        # Copy merged cells
-        for merged_cell_range in dcf_sheet.merged_cells.ranges:
-            new_sheet.merge_cells(str(merged_cell_range))
+                    new_cell.protection = copy(cell.protection)
+                    new_cell.alignment = copy(cell.alignment)
         
         # Copy column dimensions
-        for col, dimension in dcf_sheet.column_dimensions.items():
-            new_sheet.column_dimensions[col].width = dimension.width
+        for col_letter, col_dim in source_sheet.column_dimensions.items():
+            new_col_dim = new_sheet.column_dimensions[col_letter]
+            new_col_dim.width = col_dim.width
+            new_col_dim.hidden = col_dim.hidden
         
         # Copy row dimensions
-        for row, dimension in dcf_sheet.row_dimensions.items():
-            new_sheet.row_dimensions[row].height = dimension.height
+        for row_idx, row_dim in source_sheet.row_dimensions.items():
+            new_row_dim = new_sheet.row_dimensions[row_idx]
+            new_row_dim.height = row_dim.height
+            new_row_dim.hidden = row_dim.hidden
         
-        # Update valuation date
-        update_valuation_date(new_sheet)
+        # Copy merged cells
+        for merged_range in source_sheet.merged_cells.ranges:
+            new_sheet.merge_cells(str(merged_range))
         
-        # Save to temporary file
-        temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
-        consensus_wb.save(temp_output.name)
-        consensus_wb.close()
-        template.close()
-        
-        # Return the file as a streaming response
-        def file_generator():
-            with open(temp_output.name, "rb") as f:
-                yield from f
-            os.unlink(temp_output.name)
-            if consensus_path:
-                os.unlink(consensus_path)
-        
-        return StreamingResponse(
-            file_generator(),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=DCF_Model_Output.xlsx"},
-        )
+        return new_sheet
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    finally:
-        # Clean up temporary files
-        if consensus_path and os.path.exists(consensus_path):
-            os.unlink(consensus_path)
-        if temp_output and os.path.exists(temp_output.name):
-            os.unlink(temp_output.name)
+    # Start with consensus workbook as base
+    wb = openpyxl.load_workbook(consensus_path)
 
-def update_valuation_date(sheet):
-    """Update the valuation date in the DCF model to current date"""
-    for row in sheet.iter_rows():
-        for cell in row:
-            if isinstance(cell.value, str) and "Valuation Date" in cell.value:
-                sheet.cell(row=cell.row, column=cell.column + 2, value=datetime.now().date())
-                return
+    # Add Public Company sheet from profile if available
+    if profile_path and os.path.exists(profile_path):
+        profile_wb = openpyxl.load_workbook(profile_path)
+        if "Public Company" in profile_wb.sheetnames:
+            # Remove existing sheet if present
+            if "Public Company" in wb.sheetnames:
+                del wb["Public Company"]
+            source_sheet = profile_wb["Public Company"]
+            copy_sheet(source_sheet, wb, "Public Company")
+
+    # Add DCF Model from template
+    template_wb = openpyxl.load_workbook("Template.xlsx")
+    if "DCF Model" in template_wb.sheetnames:
+        # Remove existing sheet if present
+        if "DCF Model" in wb.sheetnames:
+            del wb["DCF Model"]
+        
+        source_sheet = template_wb["DCF Model"]
+        dcf_sheet = copy_sheet(source_sheet, wb, "DCF Model")
+        
+        # Turn off gridlines for cleaner look
+        dcf_sheet.sheet_view.showGridLines = False
+
+    # Save the final workbook
+    wb.save(output_path)
