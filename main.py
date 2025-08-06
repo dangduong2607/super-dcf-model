@@ -1,12 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 import shutil
 import os
-import tempfile
-from copy import copy
+from tempfile import NamedTemporaryFile
 from datetime import datetime
 
 app = FastAPI()
@@ -20,123 +19,96 @@ app.add_middleware(
 )
 
 def copy_sheet(source_sheet, target_wb, sheet_name):
-    """Copies a sheet with all formatting, formulas, and structure intact"""
+    """Copy a sheet with all formatting, formulas, and dimensions"""
     new_sheet = target_wb.create_sheet(sheet_name)
+    
+    # Copy column dimensions
+    for col in range(1, source_sheet.max_column + 1):
+        col_letter = get_column_letter(col)
+        new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
+    
+    # Copy row dimensions
+    for row in range(1, source_sheet.max_row + 1):
+        new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
     
     # Copy merged cells
     for merged_range in source_sheet.merged_cells.ranges:
         new_sheet.merge_cells(str(merged_range))
     
-    # Copy row dimensions
-    for row_idx, row_dim in source_sheet.row_dimensions.items():
-        new_row_dim = new_sheet.row_dimensions[row_idx]
-        new_row_dim.height = row_dim.height
-        new_row_dim.visible = row_dim.visible
-        new_row_dim.style = row_dim.style
-    
-    # Copy column dimensions
-    for col_idx, col_dim in source_sheet.column_dimensions.items():
-        new_col_dim = new_sheet.column_dimensions[col_idx]
-        new_col_dim.width = col_dim.width
-        new_col_dim.visible = col_dim.visible
-        new_col_dim.style = col_dim.style
-    
-    # Copy cells with all properties
+    # Copy cells with values, formulas, and formatting
     for row in source_sheet.iter_rows():
         for cell in row:
             new_cell = new_sheet.cell(
-                row=cell.row, 
-                column=cell.column, 
+                row=cell.row,
+                column=cell.column,
                 value=cell.value
             )
+            
+            # Preserve formulas
+            if cell.data_type == 'f':
+                new_cell.value = cell.value
+            
+            # Copy all styling attributes
             if cell.has_style:
-                new_cell.font = copy(cell.font)
-                new_cell.border = copy(cell.border)
-                new_cell.fill = copy(cell.fill)
+                new_cell.font = cell.font.copy()
+                new_cell.border = cell.border.copy()
+                new_cell.fill = cell.fill.copy()
                 new_cell.number_format = cell.number_format
-                new_cell.protection = copy(cell.protection)
-                new_cell.alignment = copy(cell.alignment)
-    
-    # Copy sheet properties
-    new_sheet.sheet_format = copy(source_sheet.sheet_format)
-    new_sheet.sheet_properties = copy(source_sheet.sheet_properties)
-    new_sheet.page_setup = copy(source_sheet.page_setup)
+                new_cell.protection = cell.protection.copy()
+                new_cell.alignment = cell.alignment.copy()
     
     return new_sheet
 
 def update_valuation_date(sheet):
-    """Update the valuation date in the DCF model to current date"""
+    """Update valuation date to current date"""
     for row in sheet.iter_rows():
         for cell in row:
             if cell.value and "Valuation Date" in str(cell.value):
-                sheet.cell(row=cell.row, column=cell.column + 2).value = datetime.now().date()
+                date_cell = sheet.cell(row=cell.row, column=cell.column + 2)
+                date_cell.value = datetime.now().date()
                 return
 
 @app.post("/upload")
-async def upload(
-    background_tasks: BackgroundTasks,
-    consensus: UploadFile = File(...),
-    profile: UploadFile = File(None)
-):
-    temp_files = []
+async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
+    consensus_path = "temp_consensus.xlsx"
+    profile_path = None
+    
     try:
-        # Save consensus file
-        consensus_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        shutil.copyfileobj(consensus.file, consensus_file)
-        consensus_file.close()
-        temp_files.append(consensus_file.name)
-        
-        # Save profile file if exists
-        profile_file = None
+        # Save uploaded files
+        with open(consensus_path, "wb") as f:
+            shutil.copyfileobj(consensus.file, f)
+            
         if profile:
-            profile_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            shutil.copyfileobj(profile.file, profile_file)
-            profile_file.close()
-            temp_files.append(profile_file.name)
+            profile_path = "temp_profile.xlsx"
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile.file, f)
+
+        # Load user's consensus file
+        output_wb = load_workbook(consensus_path)
         
-        # Load workbooks
-        output_wb = load_workbook(consensus_file.name)
+        # Load template DCF Model
+        template_wb = load_workbook("Template.xlsx", data_only=False)
+        dcf_sheet = template_wb["DCF Model"]
         
-        # Add profile sheets if provided
-        if profile:
-            profile_wb = load_workbook(profile_file.name)
-            for sheet_name in profile_wb.sheetnames:
-                if sheet_name in output_wb.sheetnames:
-                    continue  # Skip if sheet already exists
-                sheet = profile_wb[sheet_name]
-                copy_sheet(sheet, output_wb, sheet_name)
+        # Copy DCF Model to output workbook
+        new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
+        update_valuation_date(new_dcf_sheet)
         
-        # Load template and copy DCF Model
-        template_wb = load_workbook("Template.xlsx")
-        template_sheet = template_wb["DCF Model"]
+        # Save combined workbook
+        temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        output_wb.save(temp_file.name)
         
-        # Remove existing DCF Model if present
-        if "DCF Model" in output_wb.sheetnames:
-            output_wb.remove(output_wb["DCF Model"])
-        
-        # Copy DCF Model from template
-        new_sheet = copy_sheet(template_sheet, output_wb, "DCF Model")
-        update_valuation_date(new_sheet)
-        
-        # Save output
-        output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-        output_wb.save(output_file.name)
-        output_file.close()
-        temp_files.append(output_file.name)
-        
-        # Schedule cleanup
-        background_tasks.add_task(lambda: [os.remove(f) for f in temp_files])
-        
-        # Return the generated file
         return StreamingResponse(
-            open(output_file.name, "rb"),
+            open(temp_file.name, "rb"),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
         )
 
     except Exception as e:
-        # Cleanup on error
-        for f in temp_files:
-            if os.path.exists(f):
-                os.remove(f)
-        raise HTTPException(status_code=500, detail=f"Error processing files: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # Clean up temporary files
+        for path in [consensus_path, profile_path]:
+            if path and os.path.exists(path):
+                os.remove(path)
