@@ -1,12 +1,13 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import openpyxl
+from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from copy import copy
-import os
+from openpyxl.formula.translate import Translator
 import shutil
-import tempfile
+import os
+from tempfile import NamedTemporaryFile
+from datetime import datetime
 
 app = FastAPI()
 
@@ -18,125 +19,141 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def copy_sheet(source_sheet, target_sheet):
-    # Copy cells
+def copy_sheet_content(source_sheet, target_sheet):
+    """
+    Copies all content from source_sheet to target_sheet including formulas, values, and formatting
+    """
+    # Copy merged cells
+    for merge in source_sheet.merged_cells.ranges:
+        target_sheet.merge_cells(str(merge))
+    
+    # Copy column dimensions
+    for col, dimension in source_sheet.column_dimensions.items():
+        target_sheet.column_dimensions[col].width = dimension.width
+    
+    # Copy row dimensions
+    for row, dimension in source_sheet.row_dimensions.items():
+        target_sheet.row_dimensions[row].height = dimension.height
+    
+    # Copy all cells
     for row in source_sheet.iter_rows():
         for cell in row:
             new_cell = target_sheet.cell(
                 row=cell.row, 
                 column=cell.column,
-                value=cell.value if cell.data_type != 'f' else cell.formula
+                value=cell.value
             )
             
+            # Copy style
             if cell.has_style:
-                new_cell.font = copy(cell.font)
-                new_cell.border = copy(cell.border)
-                new_cell.fill = copy(cell.fill)
+                new_cell.font = cell.font.copy()
+                new_cell.border = cell.border.copy()
+                new_cell.fill = cell.fill.copy()
                 new_cell.number_format = cell.number_format
-                new_cell.protection = copy(cell.protection)
-                new_cell.alignment = copy(cell.alignment)
+                new_cell.protection = cell.protection.copy()
+                new_cell.alignment = cell.alignment.copy()
+            
+            # Copy hyperlinks
+            if cell.hyperlink:
+                new_cell.hyperlink = cell.hyperlink
+                new_cell.style = "Hyperlink"
+            
+            # Copy data validation
+            if cell.data_validation:
+                new_cell.data_validation = cell.data_validation.copy()
 
-    # Copy merged cells
-    for merged_range in source_sheet.merged_cells.ranges:
-        target_sheet.merged_cells.add(str(merged_range))
-
-    # Copy column dimensions
-    for col_idx, source_dim in source_sheet.column_dimensions.items():
-        target_dim = target_sheet.column_dimensions[col_idx]
-        target_dim.width = source_dim.width
-        target_dim.hidden = source_dim.hidden
-
-    # Copy row dimensions
-    for row_idx, source_dim in source_sheet.row_dimensions.items():
-        target_dim = target_sheet.row_dimensions[row_idx]
-        target_dim.height = source_dim.height
-        target_dim.hidden = source_dim.hidden
-
-    # Copy array formulas
-    for array_formula in source_sheet.array_formulae:
-        target_sheet.array_formulae[array_formula.ref] = array_formula
-
-    # Copy sheet properties
-    target_sheet.sheet_format = copy(source_sheet.sheet_format)
-    target_sheet.sheet_properties = copy(source_sheet.sheet_properties)
-    target_sheet.page_setup = copy(source_sheet.page_setup)
+def update_formula_references(sheet, old_sheet_name, new_sheet_name):
+    """
+    Updates formula references to point to the new sheet name
+    """
+    for row in sheet.iter_rows():
+        for cell in row:
+            if cell.data_type == 'f' and cell.value:  # If cell contains a formula
+                # Replace sheet references in formulas
+                if f"'{old_sheet_name}'!" in cell.value:
+                    cell.value = cell.value.replace(f"'{old_sheet_name}'!", f"'{new_sheet_name}'!")
+                elif f"{old_sheet_name}!" in cell.value:
+                    cell.value = cell.value.replace(f"{old_sheet_name}!", f"{new_sheet_name}!")
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    # Create temp directory
-    temp_dir = tempfile.mkdtemp()
-    
     try:
-        # Save uploaded files
-        consensus_path = os.path.join(temp_dir, "consensus.xlsx")
-        with open(consensus_path, "wb") as f:
-            shutil.copyfileobj(consensus.file, f)
+        # Save uploaded consensus file
+        with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_consensus:
+            shutil.copyfileobj(consensus.file, temp_consensus)
+            consensus_path = temp_consensus.name
 
-        profile_path = None
+        # Load the consensus file
+        consensus_wb = load_workbook(consensus_path)
+        
+        # Get the original sheet names for reference
+        original_sheet_names = consensus_wb.sheetnames
+        
+        # If profile file is provided, add its Public Company data
         if profile:
-            profile_path = os.path.join(temp_dir, "profile.xlsx")
-            with open(profile_path, "wb") as f:
-                shutil.copyfileobj(profile.file, f)
-
-        # Generate output path
-        output_path = os.path.join(temp_dir, "DCF_Model_Output.xlsx")
-        
-        # Create new workbook
-        new_wb = openpyxl.Workbook()
-        default_sheet = new_wb.active
-        new_wb.remove(default_sheet)
-
-        # Step 1: Copy all sheets from consensus
-        consensus_wb = openpyxl.load_workbook(consensus_path, data_only=False)
-        for sheet_name in consensus_wb.sheetnames:
-            source_sheet = consensus_wb[sheet_name]
-            new_sheet = new_wb.create_sheet(sheet_name)
-            copy_sheet(source_sheet, new_sheet)
-
-        # Step 2: Handle Public Company sheet
-        public_company_added = False
-        # Try from profile file
-        if profile_path:
-            profile_wb = openpyxl.load_workbook(profile_path, data_only=False)
+            with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_profile:
+                shutil.copyfileobj(profile.file, temp_profile)
+                profile_path = temp_profile.name
+            
+            profile_wb = load_workbook(profile_path)
             if "Public Company" in profile_wb.sheetnames:
-                source_sheet = profile_wb["Public Company"]
-                # Remove existing if present
-                if "Public Company" in new_wb.sheetnames:
-                    new_wb.remove(new_wb["Public Company"])
-                new_sheet = new_wb.create_sheet("Public Company")
-                copy_sheet(source_sheet, new_sheet)
-                public_company_added = True
+                profile_sheet = profile_wb["Public Company"]
+                
+                # Remove existing sheet if present
+                if "Public Company" in consensus_wb.sheetnames:
+                    consensus_wb.remove(consensus_wb["Public Company"])
+                
+                # Create new sheet and copy all content
+                new_profile_sheet = consensus_wb.create_sheet("Public Company")
+                copy_sheet_content(profile_sheet, new_profile_sheet)
+            
+            os.unlink(profile_path)
+
+        # Load the template
+        template = load_workbook("Template.xlsx", data_only=False)  # Important to keep formulas
+        template_dcf_sheet = template["DCF Model"]
         
-        # Try from consensus file if not added from profile
-        if not public_company_added and "Public Company" in consensus_wb.sheetnames:
-            source_sheet = consensus_wb["Public Company"]
-            # Remove existing if present
-            if "Public Company" in new_wb.sheetnames:
-                new_wb.remove(new_wb["Public Company"])
-            new_sheet = new_wb.create_sheet("Public Company")
-            copy_sheet(source_sheet, new_sheet)
-            public_company_added = True
-
-        # Step 3: Copy DCF Model from template
-        template_wb = openpyxl.load_workbook("Template.xlsx", data_only=False)
-        if "DCF Model" in template_wb.sheetnames:
-            source_sheet = template_wb["DCF Model"]
-            # Remove existing if present
-            if "DCF Model" in new_wb.sheetnames:
-                new_wb.remove(new_wb["DCF Model"])
-            new_sheet = new_wb.create_sheet("DCF Model")
-            copy_sheet(source_sheet, new_sheet)
-
-        # Save the new workbook
-        new_wb.save(output_path)
-
-        # Return the generated file
+        # Remove existing DCF Model sheet if it exists
+        if "DCF Model" in consensus_wb.sheetnames:
+            consensus_wb.remove(consensus_wb["DCF Model"])
+        
+        # Create new DCF Model sheet and copy all content
+        new_dcf_sheet = consensus_wb.create_sheet("DCF Model")
+        copy_sheet_content(template_dcf_sheet, new_dcf_sheet)
+        
+        # Update formula references to point to the original consensus sheet name
+        # Assuming the first sheet is the consensus sheet
+        if original_sheet_names:
+            consensus_sheet_name = original_sheet_names[0]
+            update_formula_references(new_dcf_sheet, "Consensus", consensus_sheet_name)
+        
+        # Update valuation date
+        update_valuation_date(new_dcf_sheet)
+        
+        # Save to temporary output file
+        temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        consensus_wb.save(temp_output.name)
+        
         return StreamingResponse(
-            open(output_path, "rb"),
+            open(temp_output.name, "rb"),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
+            headers={"Content-Disposition": "attachment; filename=DCF_Model_Output.xlsx"},
         )
-        
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
     finally:
         # Clean up temporary files
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(consensus_path):
+            os.unlink(consensus_path)
+        if 'temp_output' in locals() and os.path.exists(temp_output.name):
+            os.unlink(temp_output.name)
+
+def update_valuation_date(sheet):
+    """Updates the valuation date in the DCF model to current date"""
+    for row in sheet.iter_rows(min_row=1, max_row=500, min_col=1, max_col=20):  # A1:T500 range
+        for cell in row:
+            if isinstance(cell.value, str) and "Valuation Date" in cell.value:
+                sheet.cell(row=cell.row, column=cell.column + 2).value = datetime.now().date()
+                return
