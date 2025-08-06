@@ -34,11 +34,13 @@ def update_valuation_date(sheet):
 def load_file_content(file_path):
     """Loads file content as a DataFrame, handling both XLSX and CSV."""
     try:
-        # First, try to load as an XLSX file
+        # Try to load as an XLSX file first
         wb = load_workbook(file_path)
         sheet = wb.active
         data = sheet.values
+        # Create a DataFrame from the sheet data
         cols = next(data)
+        data = list(data)
         df = pd.DataFrame(data, columns=cols)
         return df
     except InvalidFileException:
@@ -91,7 +93,7 @@ async def upload(
             for r in dataframe_to_rows(profile_df, index=False, header=True):
                 ws_profile.append(r)
 
-        # --- Copy DCF Model from Template ---
+        # --- Copy DCF Model from Template, preserving formulas ---
         dcf_sheet = template_wb["DCF Model"]
         new_dcf_sheet = merged_wb.create_sheet("DCF Model Output")
         
@@ -99,9 +101,15 @@ async def upload(
             for cell in row:
                 new_cell = new_dcf_sheet.cell(
                     row=cell.row, 
-                    column=cell.column,
-                    value=cell.value
+                    column=cell.column
                 )
+                # Copy formula if it exists. This is the key fix.
+                if cell.data_type == 'f':
+                    new_cell.value = cell.formula
+                else:
+                    new_cell.value = cell.value
+
+                # Copy styling (font, border, fill, etc.)
                 if cell.has_style:
                     new_cell.font = cell.font.copy()
                     new_cell.border = cell.border.copy()
