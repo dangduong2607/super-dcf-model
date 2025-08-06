@@ -1,14 +1,17 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import pandas as pd
+import openpyxl
 from openpyxl import load_workbook
-import shutil
+import tempfile
 import os
-from tempfile import NamedTemporaryFile
 from datetime import datetime
+import shutil
 
 app = FastAPI()
 
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,103 +20,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/upload")
-async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    try:
-        # Create temporary files
-        with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_consensus:
-            shutil.copyfileobj(consensus.file, temp_consensus)
-            consensus_path = temp_consensus.name
-
-        # Load the consensus file
-        consensus_wb = load_workbook(consensus_path)
-        
-        # If profile file is provided, add it to the workbook
-        if profile:
-            with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_profile:
-                shutil.copyfileobj(profile.file, temp_profile)
-                profile_path = temp_profile.name
-            
-            profile_wb = load_workbook(profile_path)
-            if "Public Company" in profile_wb.sheetnames:
-                profile_sheet = profile_wb["Public Company"]
-                if "Public Company" in consensus_wb.sheetnames:
-                    consensus_wb.remove(consensus_wb["Public Company"])
-                consensus_wb.create_sheet("Public Company")
-                new_profile_sheet = consensus_wb["Public Company"]
-                
-                # Copy all content from profile sheet
-                for row in profile_sheet.iter_rows():
-                    for cell in row:
-                        new_cell = new_profile_sheet.cell(
-                            row=cell.row, 
-                            column=cell.column,
-                            value=cell.value
-                        )
-                        if cell.has_style:
-                            new_cell.font = cell.font.copy()
-                            new_cell.border = cell.border.copy()
-                            new_cell.fill = cell.fill.copy()
-                            new_cell.number_format = cell.number_format
-                            new_cell.protection = cell.protection.copy()
-                            new_cell.alignment = cell.alignment.copy()
-            
-            os.unlink(profile_path)
-
+def process_dcf_model(consensus_file, profile_file=None):
+    # Create a temporary directory to work in
+    with tempfile.TemporaryDirectory() as temp_dir:
         # Load the template
-        template = load_workbook("Template.xlsx")
+        template_path = os.path.join(os.path.dirname(__file__), "Template.xlsx")
+        template_wb = load_workbook(template_path)
         
-        # Remove existing DCF Model sheet if it exists
-        if "DCF Model" in consensus_wb.sheetnames:
-            consensus_wb.remove(consensus_wb["DCF Model"])
+        # Load the consensus data
+        consensus_wb = load_workbook(consensus_file)
         
-        # Copy DCF Model sheet from template to consensus workbook
-        dcf_sheet = template["DCF Model"]
-        new_sheet = consensus_wb.create_sheet("DCF Model")
+        # Copy data from Consensus sheet to template
+        if 'Consensus' in consensus_wb.sheetnames:
+            consensus_sheet = consensus_wb['Consensus']
+            template_consensus_sheet = template_wb['Consensus']
+            
+            # Copy all data from uploaded consensus to template
+            for row in consensus_sheet.iter_rows(values_only=True):
+                template_consensus_sheet.append(row)
         
-        # Copy all cells including values, styles, and formulas
-        for row in dcf_sheet.iter_rows():
-            for cell in row:
-                new_cell = new_sheet.cell(
-                    row=cell.row, 
-                    column=cell.column,
-                    value=cell.value
-                )
-                if cell.has_style:
-                    new_cell.font = cell.font.copy()
-                    new_cell.border = cell.border.copy()
-                    new_cell.fill = cell.fill.copy()
-                    new_cell.number_format = cell.number_format
-                    new_cell.protection = cell.protection.copy()
-                    new_cell.alignment = cell.alignment.copy()
+        # If profile file is provided, load and process it
+        if profile_file:
+            profile_wb = load_workbook(profile_file)
+            if 'Public Company' in profile_wb.sheetnames:
+                profile_sheet = profile_wb['Public Company']
+                template_profile_sheet = template_wb['Public Company']
+                
+                # Copy all data from uploaded profile to template
+                for row in profile_sheet.iter_rows(values_only=True):
+                    template_profile_sheet.append(row)
         
-        # Update valuation date
-        update_valuation_date(new_sheet)
+        # Save the modified template to a temporary file
+        output_path = os.path.join(temp_dir, "DCF_Model.xlsx")
+        template_wb.save(output_path)
         
-        # Save to temporary file
-        temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
-        consensus_wb.save(temp_output.name)
-        
-        return StreamingResponse(
-            open(temp_output.name, "rb"),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=DCF_Model_Output.xlsx"},
-        )
+        return output_path
 
+@app.post("/upload")
+async def upload_files(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
+    try:
+        # Save uploaded files temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as consensus_temp:
+            shutil.copyfileobj(consensus.file, consensus_temp)
+            consensus_temp_path = consensus_temp.name
+        
+        profile_temp_path = None
+        if profile:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as profile_temp:
+                shutil.copyfileobj(profile.file, profile_temp)
+                profile_temp_path = profile_temp.name
+        
+        # Process the files
+        output_path = process_dcf_model(consensus_temp_path, profile_temp_path)
+        
+        # Clean up temporary files
+        os.unlink(consensus_temp_path)
+        if profile_temp_path:
+            os.unlink(profile_temp_path)
+        
+        # Return the generated file
+        return FileResponse(
+            output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="DCF_Model.xlsx"
+        )
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-    finally:
-        # Clean up temporary files
-        if os.path.exists(consensus_path):
-            os.unlink(consensus_path)
-        if 'temp_output' in locals() and os.path.exists(temp_output.name):
-            os.unlink(temp_output.name)
 
-def update_valuation_date(sheet):
-    """Update the valuation date in the DCF model to current date"""
-    for row in sheet.iter_rows():
-        for cell in row:
-            if isinstance(cell.value, str) and "Valuation Date" in cell.value:
-                sheet.cell(row=cell.row, column=cell.column + 2).value = datetime.now().date()
-                return
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
