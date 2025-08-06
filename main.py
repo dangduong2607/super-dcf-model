@@ -1,178 +1,85 @@
-<!-- Updated frontend with better error handling -->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DCF Valuation Generator</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
-  <style>
-    * {
-      box-sizing: border-box;
-      font-family: 'Inter', sans-serif;
-    }
-    body {
-      background: #f0f4f8;
-      margin: 0;
-      padding: 40px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .container {
-      background: #fff;
-      padding: 30px 40px;
-      border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-      max-width: 500px;
-      width: 100%;
-    }
-    h1 {
-      text-align: center;
-      color: #2c3e50;
-      font-size: 24px;
-      margin-bottom: 24px;
-    }
-    label {
-      font-weight: 600;
-      margin-top: 20px;
-      display: block;
-    }
-    input[type="file"] {
-      margin-top: 8px;
-      width: 100%;
-      padding: 8px;
-    }
-    button {
-      margin-top: 30px;
-      width: 100%;
-      padding: 12px;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 16px;
-      cursor: pointer;
-      transition: background-color 0.2s ease;
-    }
-    button:hover {
-      background-color: #0056b3;
-    }
-    #downloadLink {
-      display: none;
-      margin-top: 20px;
-      text-align: center;
-      font-weight: 600;
-      color: #007BFF;
-    }
-    #statusMessage {
-      margin-top: 20px;
-      padding: 10px;
-      border-radius: 8px;
-      text-align: center;
-      display: none;
-    }
-    .error {
-      background-color: #ffebee;
-      color: #c62828;
-    }
-    .success {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-    }
-    .loading {
-      display: inline-block;
-      width: 20px;
-      height: 20px;
-      border: 3px solid rgba(0,0,0,.3);
-      border-radius: 50%;
-      border-top-color: #007BFF;
-      animation: spin 1s ease-in-out infinite;
-      margin-right: 10px;
-      vertical-align: middle;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>DCF Valuation Generator</h1>
-    <form id="uploadForm" enctype="multipart/form-data">
-      <label for="consensus">Consensus File (required)</label>
-      <input type="file" name="consensus" accept=".xlsx" required>
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from openpyxl import load_workbook
+import shutil
+import os
+from tempfile import NamedTemporaryFile
+from datetime import datetime
 
-      <label for="profile">Corporate Profile File (optional)</label>
-      <input type="file" name="profile" accept=".xlsx">
+app = FastAPI()
 
-      <button type="submit" id="submitBtn">
-        <span id="submitText">Generate DCF Model</span>
-        <span id="loadingSpinner" style="display:none;" class="loading"></span>
-      </button>
-    </form>
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    <div id="statusMessage"></div>
-    <a id="downloadLink">Download DCF Model</a>
-  </div>
+@app.post("/upload")
+async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
+    try:
+        # Save uploaded files temporarily
+        consensus_path = "temp_consensus.xlsx"
+        with open(consensus_path, "wb") as f:
+            shutil.copyfileobj(consensus.file, f)
 
-  <script>
-    document.getElementById('uploadForm').onsubmit = async function(e) {
-      e.preventDefault();
-      
-      // Show loading state
-      const submitBtn = document.getElementById('submitBtn');
-      const submitText = document.getElementById('submitText');
-      const loadingSpinner = document.getElementById('loadingSpinner');
-      const statusMessage = document.getElementById('statusMessage');
-      
-      submitBtn.disabled = true;
-      submitText.textContent = "Processing...";
-      loadingSpinner.style.display = 'inline-block';
-      statusMessage.style.display = 'none';
-      
-      try {
-        const formData = new FormData(this);
-        const response = await fetch('https://dcf-backend-hjku.onrender.com/upload', {
-          method: 'POST',
-          body: formData
-        });
+        profile_path = None
+        if profile:
+            profile_path = "temp_profile.xlsx"
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile.file, f)
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Server error');
-        }
+        # Generate the output file
+        output_path = generate_output_file(consensus_path, profile_path)
 
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const downloadLink = document.getElementById('downloadLink');
+        # Return the generated file
+        return StreamingResponse(
+            open(output_path, "rb"),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # Clean up temporary files
+        if os.path.exists(consensus_path):
+            os.remove(consensus_path)
+        if profile_path and os.path.exists(profile_path):
+            os.remove(profile_path)
+
+def generate_output_file(consensus_path, profile_path):
+    try:
+        # Create a new workbook with just the DCF Model sheet from template
+        template = load_workbook("Template.xlsx")
         
-        downloadLink.href = url;
-        downloadLink.download = "DCF_Model.xlsx";
-        downloadLink.textContent = "Download DCF Model";
-        downloadLink.style.display = 'block';
+        # Create a new workbook with only the DCF Model sheet
+        output_wb = load_workbook("Template.xlsx")
         
-        // Show success message
-        statusMessage.textContent = "File generated successfully!";
-        statusMessage.className = "success";
-        statusMessage.style.display = 'block';
+        # Remove all sheets except DCF Model
+        for sheet_name in output_wb.sheetnames:
+            if sheet_name != "DCF Model":
+                output_wb.remove(output_wb[sheet_name])
         
-      } catch (error) {
-        console.error('Error:', error);
+        # Update valuation date in the DCF Model
+        dcf_sheet = output_wb["DCF Model"]
+        update_valuation_date(dcf_sheet)
         
-        // Show error message
-        statusMessage.textContent = `Error: ${error.message || 'Failed to generate file'}`;
-        statusMessage.className = "error";
-        statusMessage.style.display = 'block';
+        # Save to temporary file
+        temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        output_wb.save(temp_file.name)
+        return temp_file.name
         
-      } finally {
-        // Reset button state
-        submitBtn.disabled = false;
-        submitText.textContent = "Generate DCF Model";
-        loadingSpinner.style.display = 'none';
-      }
-    }
-  </script>
-</body>
-</html>
+    except Exception as e:
+        raise Exception(f"Error generating output file: {str(e)}")
+
+def update_valuation_date(dcf_sheet):
+    """Update the valuation date in the DCF model to current date"""
+    for row in dcf_sheet.iter_rows():
+        for cell in row:
+            if cell.value == "Valuation Date":
+                dcf_sheet.cell(row=cell.row, column=cell.column + 2).value = datetime.now().date()
+                return
