@@ -81,8 +81,19 @@
     .subtitle {
       text-align: center;
       color: var(--text-light);
-      margin-bottom: 2rem;
+      margin-bottom: 1rem;
       font-size: 0.95rem;
+    }
+
+    .note {
+      text-align: center;
+      color: var(--text-light);
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      font-style: italic;
+      padding: 0.5rem;
+      background-color: rgba(67, 97, 238, 0.05);
+      border-radius: 4px;
     }
 
     .form-group {
@@ -208,6 +219,55 @@
       animation: spin 1s linear infinite;
     }
 
+    .profile-section {
+      margin-top: 2rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .profile-image {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--border);
+    }
+
+    .profile-info {
+      flex: 1;
+    }
+
+    .profile-name {
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .profile-title {
+      font-size: 0.85rem;
+      color: var(--text-light);
+      margin-bottom: 0.5rem;
+    }
+
+    .profile-links {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .profile-links a {
+      color: var(--primary);
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: var(--transition);
+    }
+
+    .profile-links a:hover {
+      color: var(--primary-dark);
+      text-decoration: underline;
+    }
+
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
@@ -221,6 +281,15 @@
       h1 {
         font-size: 1.5rem;
       }
+
+      .profile-section {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .profile-links {
+        justify-content: center;
+      }
     }
   </style>
 </head>
@@ -228,6 +297,7 @@
   <div class="container">
     <h1><i class="fas fa-calculator"></i> DCF Valuation Generator</h1>
     <p class="subtitle">Upload your Capital IQ files to generate a complete DCF model with preserved formatting</p>
+    <p class="note">Please enable circular referencing on the downloaded Excel file and retain all functioning elements for optimal results.</p>
     
     <form id="uploadForm" enctype="multipart/form-data">
       <div class="form-group">
@@ -264,6 +334,19 @@
     <a id="downloadLink" class="download-btn">
       <i class="fas fa-download"></i> Download DCF Model
     </a>
+
+    <div class="profile-section">
+      <img src="https://media.licdn.com/dms/image/v2/C5603AQG8Jczd7eEl2A/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/1650615669071?e=1757548800&v=beta&t=23wCHoT5UziuM6X52nSE5q3Ew8lJAO9S_V7DOissGBg" alt="Dang Duong Nguyen" class="profile-image">
+      <div class="profile-info">
+        <div class="profile-name">Dang Duong Nguyen</div>
+        <div class="profile-title">Finance Professional & Developer</div>
+        <div class="profile-links">
+          <a href="mailto:dangduongnguyen2607@gmail.com"><i class="fas fa-envelope"></i> Email</a>
+          <a href="https://www.linkedin.com/in/dangduongnguyen/" target="_blank"><i class="fab fa-linkedin"></i> LinkedIn</a>
+          <a href="https://www.instagram.com/ddanguong/" target="_blank"><i class="fab fa-instagram"></i> Instagram</a>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
