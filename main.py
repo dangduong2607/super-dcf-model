@@ -18,18 +18,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def copy_sheet_with_formatting(source_sheet, target_wb, sheet_name):
-    """Copy a sheet with all formatting, formulas, dimensions, and merged cells"""
-    # Create new sheet in target workbook
+def copy_sheet(source_sheet, target_wb, sheet_name):
+    """Copy a sheet with all formatting, formulas, and dimensions"""
     new_sheet = target_wb.create_sheet(sheet_name)
     
     # Copy column dimensions
-    for col_idx, col_dim in source_sheet.column_dimensions.items():
-        new_sheet.column_dimensions[col_idx].width = col_dim.width
+    for col in range(1, source_sheet.max_column + 1):
+        col_letter = get_column_letter(col)
+        new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
     
     # Copy row dimensions
-    for row_idx, row_dim in source_sheet.row_dimensions.items():
-        new_sheet.row_dimensions[row_idx].height = row_dim.height
+    for row in range(1, source_sheet.max_row + 1):
+        new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
     
     # Copy merged cells
     for merged_range in source_sheet.merged_cells.ranges:
@@ -74,27 +74,24 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     profile_path = None
     
     try:
-        # Save uploaded consensus file
+        # Save uploaded files
         with open(consensus_path, "wb") as f:
             shutil.copyfileobj(consensus.file, f)
             
-        # Save profile file if provided
         if profile:
             profile_path = "temp_profile.xlsx"
             with open(profile_path, "wb") as f:
                 shutil.copyfileobj(profile.file, f)
 
-        # Load user's consensus file - this will be our base output
+        # Load user's consensus file
         output_wb = load_workbook(consensus_path)
         
-        # Load template to get perfect DCF Model sheet
+        # Load template DCF Model
         template_wb = load_workbook("Template.xlsx", data_only=False)
         dcf_sheet = template_wb["DCF Model"]
         
-        # Copy the perfect DCF Model sheet to output workbook
-        new_dcf_sheet = copy_sheet_with_formatting(dcf_sheet, output_wb, "DCF Model")
-        
-        # Update valuation date
+        # Copy DCF Model to output workbook
+        new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
         update_valuation_date(new_dcf_sheet)
         
         # Save combined workbook
