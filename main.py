@@ -5,7 +5,6 @@ from openpyxl import load_workbook
 import shutil
 import os
 from tempfile import NamedTemporaryFile
-from datetime import datetime
 
 app = FastAPI()
 
@@ -20,84 +19,25 @@ app.add_middleware(
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
     try:
-        # Create temporary files
-        with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_consensus:
-            shutil.copyfileobj(consensus.file, temp_consensus)
-            consensus_path = temp_consensus.name
+        # Save uploaded files temporarily
+        consensus_path = "temp_consensus.xlsx"
+        with open(consensus_path, "wb") as f:
+            shutil.copyfileobj(consensus.file, f)
 
-        # Load the consensus file
-        consensus_wb = load_workbook(consensus_path)
-        
-        # If profile file is provided, add it to the workbook
+        profile_path = None
         if profile:
-            with NamedTemporaryFile(delete=False, suffix=".xlsx") as temp_profile:
-                shutil.copyfileobj(profile.file, temp_profile)
-                profile_path = temp_profile.name
-            
-            profile_wb = load_workbook(profile_path)
-            if "Public Company" in profile_wb.sheetnames:
-                profile_sheet = profile_wb["Public Company"]
-                if "Public Company" in consensus_wb.sheetnames:
-                    consensus_wb.remove(consensus_wb["Public Company"])
-                consensus_wb.create_sheet("Public Company")
-                new_profile_sheet = consensus_wb["Public Company"]
-                
-                # Copy all content from profile sheet
-                for row in profile_sheet.iter_rows():
-                    for cell in row:
-                        new_cell = new_profile_sheet.cell(
-                            row=cell.row, 
-                            column=cell.column,
-                            value=cell.value
-                        )
-                        if cell.has_style:
-                            new_cell.font = cell.font.copy()
-                            new_cell.border = cell.border.copy()
-                            new_cell.fill = cell.fill.copy()
-                            new_cell.number_format = cell.number_format
-                            new_cell.protection = cell.protection.copy()
-                            new_cell.alignment = cell.alignment.copy()
-            
-            os.unlink(profile_path)
+            profile_path = "temp_profile.xlsx"
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile.file, f)
 
-        # Load the template
-        template = load_workbook("Template.xlsx")
-        
-        # Remove existing DCF Model sheet if it exists
-        if "DCF Model" in consensus_wb.sheetnames:
-            consensus_wb.remove(consensus_wb["DCF Model"])
-        
-        # Copy DCF Model sheet from template to consensus workbook
-        dcf_sheet = template["DCF Model"]
-        new_sheet = consensus_wb.create_sheet("DCF Model")
-        
-        # Copy all cells including values, styles, and formulas
-        for row in dcf_sheet.iter_rows():
-            for cell in row:
-                new_cell = new_sheet.cell(
-                    row=cell.row, 
-                    column=cell.column,
-                    value=cell.value
-                )
-                if cell.has_style:
-                    new_cell.font = cell.font.copy()
-                    new_cell.border = cell.border.copy()
-                    new_cell.fill = cell.fill.copy()
-                    new_cell.number_format = cell.number_format
-                    new_cell.protection = cell.protection.copy()
-                    new_cell.alignment = cell.alignment.copy()
-        
-        # Update valuation date
-        update_valuation_date(new_sheet)
-        
-        # Save to temporary file
-        temp_output = NamedTemporaryFile(delete=False, suffix=".xlsx")
-        consensus_wb.save(temp_output.name)
-        
+        # Generate the output file
+        output_path = generate_output_file(consensus_path, profile_path)
+
+        # Return the generated file
         return StreamingResponse(
-            open(temp_output.name, "rb"),
+            open(output_path, "rb"),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=DCF_Model_Output.xlsx"},
+            headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsx"},
         )
 
     except Exception as e:
@@ -106,14 +46,27 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     finally:
         # Clean up temporary files
         if os.path.exists(consensus_path):
-            os.unlink(consensus_path)
-        if 'temp_output' in locals() and os.path.exists(temp_output.name):
-            os.unlink(temp_output.name)
+            os.remove(consensus_path)
+        if profile_path and os.path.exists(profile_path):
+            os.remove(profile_path)
 
-def update_valuation_date(sheet):
-    """Update the valuation date in the DCF model to current date"""
-    for row in sheet.iter_rows():
-        for cell in row:
-            if isinstance(cell.value, str) and "Valuation Date" in cell.value:
-                sheet.cell(row=cell.row, column=cell.column + 2).value = datetime.now().date()
-                return
+def generate_output_file(consensus_path, profile_path):
+    try:
+        # Load the template
+        template = load_workbook("Template.xlsx")
+        
+        # Create a new workbook with only the DCF Model sheet
+        output_wb = load_workbook("Template.xlsx")
+        
+        # Remove all sheets except DCF Model
+        for sheet_name in output_wb.sheetnames:
+            if sheet_name != "DCF Model":
+                output_wb.remove(output_wb[sheet_name])
+        
+        # Save to temporary file
+        temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
+        output_wb.save(temp_file.name)
+        return temp_file.name
+        
+    except Exception as e:
+        raise Exception(f"Error generating output file: {str(e)}")
