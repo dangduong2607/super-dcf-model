@@ -92,8 +92,8 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
             source_sheet = consensus_wb[sheet_name]
             copy_sheet(source_sheet, output_wb, sheet_name)
         
-        # Handle profile file if provided
-        if profile_path:
+        # Handle profile file if provided and exists
+        if profile_path and os.path.exists(profile_path):
             profile_wb = load_workbook(profile_path)
             for sheet_name in profile_wb.sheetnames:
                 if sheet_name == "DCF Model":
