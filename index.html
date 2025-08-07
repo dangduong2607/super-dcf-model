@@ -307,7 +307,7 @@
           <label class="file-input-label" for="consensus">
             <i class="fas fa-file-excel"></i>
             <span class="file-input-text" id="consensusFileName">
-              Consensus File (required) and Profile (Optional)
+              Consensus File (Required) and Profile (Optional)
             </span>
           </label>
           <input type="file" id="consensus" name="consensus" accept=".xlsx" required>
@@ -347,7 +347,7 @@
   <script>
     // Update file name display when file is selected
     document.getElementById('consensus').addEventListener('change', function(e) {
-      const fileName = e.target.files[0] ? e.target.files[0].name : 'Consensus File (required) and Profile (Optional)';
+      const fileName = e.target.files[0] ? e.target.files[0].name : 'Consensus File (Required) and Profile (Optional)';
       document.getElementById('consensusFileName').textContent = fileName;
     });
 
