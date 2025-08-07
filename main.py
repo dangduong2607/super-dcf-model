@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.exceptions import InvalidFileException
+from zipfile import BadZipFile
 import shutil
 import os
 import tempfile
@@ -101,23 +103,35 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
             logger.info("Cleaned template sheets")
             
             # Process consensus file
-            consensus_wb = load_workbook(consensus_path)
-            for sheet_name in consensus_wb.sheetnames:
-                if sheet_name == "DCF Model":
-                    continue
-                source_sheet = consensus_wb[sheet_name]
-                copy_sheet(source_sheet, output_wb, sheet_name)
-            logger.info("Processed consensus file")
+            try:
+                consensus_wb = load_workbook(consensus_path)
+                for sheet_name in consensus_wb.sheetnames:
+                    if sheet_name == "DCF Model":
+                        continue
+                    source_sheet = consensus_wb[sheet_name]
+                    copy_sheet(source_sheet, output_wb, sheet_name)
+                logger.info("Processed consensus file")
+            except (BadZipFile, InvalidFileException) as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid consensus file. Please upload a valid Excel (.xlsx) file."
+                )
             
             # Process profile file if provided
             if profile and profile_path and os.path.exists(profile_path):
-                profile_wb = load_workbook(profile_path)
-                for sheet_name in profile_wb.sheetnames:
-                    if sheet_name == "DCF Model":
-                        continue
-                    source_sheet = profile_wb[sheet_name]
-                    copy_sheet(source_sheet, output_wb, sheet_name)
-                logger.info("Processed profile file")
+                try:
+                    profile_wb = load_workbook(profile_path)
+                    for sheet_name in profile_wb.sheetnames:
+                        if sheet_name == "DCF Model":
+                            continue
+                        source_sheet = profile_wb[sheet_name]
+                        copy_sheet(source_sheet, output_wb, sheet_name)
+                    logger.info("Processed profile file")
+                except (BadZipFile, InvalidFileException) as e:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid profile file. Please upload a valid Excel (.xlsx) file."
+                    )
             
             # Save output
             output_wb.save(output_path)
@@ -130,6 +144,9 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
                 headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsm"},
             )
             
+        except HTTPException:
+            # Re-raise our custom HTTP exceptions
+            raise
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
