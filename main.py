@@ -92,14 +92,15 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
             source_sheet = consensus_wb[sheet_name]
             copy_sheet(source_sheet, output_wb, sheet_name)
         
-        # Handle profile file if provided and exists
-        if profile_path and os.path.exists(profile_path):
+        # CODE A: Handle profile file if provided
+        if profile:  # Explicit check if profile file was uploaded
             profile_wb = load_workbook(profile_path)
             for sheet_name in profile_wb.sheetnames:
                 if sheet_name == "DCF Model":
                     continue
                 source_sheet = profile_wb[sheet_name]
                 copy_sheet(source_sheet, output_wb, sheet_name)
+        # CODE B: No action needed when profile is not provided
         
         # Save as macro-enabled workbook
         with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
