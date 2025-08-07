@@ -6,7 +6,6 @@ from openpyxl.utils import get_column_letter
 import shutil
 import os
 from tempfile import NamedTemporaryFile
-from datetime import datetime
 
 app = FastAPI()
 
@@ -59,15 +58,6 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
     
     return new_sheet
 
-def update_valuation_date(sheet):
-    """Update valuation date to current date"""
-    for row in sheet.iter_rows():
-        for cell in row:
-            if cell.value and "Valuation Date" in str(cell.value):
-                date_cell = sheet.cell(row=cell.row, column=cell.column + 2)
-                date_cell.value = datetime.now().date()
-                return
-
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
     consensus_path = "temp_consensus.xlsx"
@@ -92,7 +82,6 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
         
         # Copy DCF Model to output workbook
         new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
-        update_valuation_date(new_dcf_sheet)
         
         # Save combined workbook
         temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
