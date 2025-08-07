@@ -298,29 +298,22 @@
     <h1><i class="fas fa-calculator"></i> DCF Valuation Generator</h1>
     <p class="subtitle">Upload your Capital IQ files to generate a complete DCF model with preserved formatting</p>
     
-    <!-- THE CHANGE IS RIGHT HERE IN THIS NOTE SECTION -->
     <p class="note">Please enable iterative calculation in Excel for the downloaded file (File > Options > Formulas > Enable iterative calculation) to handle circular references and retain all functioning elements for optimal results.</p>
     
     <form id="uploadForm" enctype="multipart/form-data">
       <div class="form-group">
-        <label for="consensus">Consensus File</label>
+        <label for="consensus">Upload Excel File with:</label>
         <div class="file-input-container">
           <label class="file-input-label" for="consensus">
             <i class="fas fa-file-excel"></i>
-            <span class="file-input-text" id="consensusFileName">Click to upload Excel file (required)</span>
+            <span class="file-input-text" id="consensusFileName">
+              Consensus File (required) and Corporate Profile (Optional)
+            </span>
           </label>
           <input type="file" id="consensus" name="consensus" accept=".xlsx" required>
         </div>
-      </div>
-
-      <div class="form-group">
-        <label for="profile">Corporate Profile (Optional)</label>
-        <div class="file-input-container">
-          <label class="file-input-label" for="profile">
-            <i class="fas fa-file-alt"></i>
-            <span class="file-input-text" id="profileFileName">Click to upload Excel file (optional)</span>
-          </label>
-          <input type="file" id="profile" name="profile" accept=".xlsx">
+        <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text-light); text-align: center;">
+          <i class="fas fa-info-circle"></i> Include both files in a single Excel workbook
         </div>
       </div>
 
@@ -330,7 +323,7 @@
     </form>
 
     <div class="loading" id="loading">
-      <i class="fas fa-spinner"></i> Processing your files...
+      <i class="fas fa-spinner"></i> Processing your file...
     </div>
 
     <a id="downloadLink" class="download-btn">
@@ -352,15 +345,10 @@
   </div>
 
   <script>
-    // Update file name display when files are selected
+    // Update file name display when file is selected
     document.getElementById('consensus').addEventListener('change', function(e) {
-      const fileName = e.target.files[0] ? e.target.files[0].name : 'Click to upload Excel file (required)';
+      const fileName = e.target.files[0] ? e.target.files[0].name : 'Consensus File (required) and Corporate Profile (Optional)';
       document.getElementById('consensusFileName').textContent = fileName;
-    });
-
-    document.getElementById('profile').addEventListener('change', function(e) {
-      const fileName = e.target.files[0] ? e.target.files[0].name : 'Click to upload Excel file (optional)';
-      document.getElementById('profileFileName').textContent = fileName;
     });
 
     document.getElementById('uploadForm').onsubmit = async function(e) {
