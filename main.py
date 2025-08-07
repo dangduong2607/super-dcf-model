@@ -3,16 +3,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.exceptions import InvalidFileException
-from zipfile import BadZipFile
 import shutil
 import os
-import tempfile
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from tempfile import NamedTemporaryFile
 
 app = FastAPI()
 
@@ -31,13 +24,11 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
     # Copy column dimensions
     for col in range(1, source_sheet.max_column + 1):
         col_letter = get_column_letter(col)
-        if col_letter in source_sheet.column_dimensions:
-            new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
+        new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
     
     # Copy row dimensions
     for row in range(1, source_sheet.max_row + 1):
-        if row in source_sheet.row_dimensions:
-            new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+        new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
     
     # Copy merged cells
     for merged_range in source_sheet.merged_cells.ranges:
@@ -69,84 +60,54 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
 
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
-    # Create a temporary directory for all files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        consensus_path = os.path.join(temp_dir, "consensus.xlsx")
-        profile_path = os.path.join(temp_dir, "profile.xlsx") if profile else None
-        output_path = os.path.join(temp_dir, "output.xlsm")
+    consensus_path = "temp_consensus.xlsx"
+    profile_path = None
+    temp_file_path = None  # Initialize temp_file_path
+    
+    try:
+        # Save uploaded files
+        with open(consensus_path, "wb") as f:
+            shutil.copyfileobj(consensus.file, f)
+            
+        if profile:
+            profile_path = "temp_profile.xlsx"
+            with open(profile_path, "wb") as f:
+                shutil.copyfileobj(profile.file, f)
+
+        # Load macro-enabled template as output workbook
+        output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
         
-        try:
-            # Save consensus file
-            with open(consensus_path, "wb") as f:
-                shutil.copyfileobj(consensus.file, f)
-            logger.info(f"Saved consensus file to: {consensus_path}")
-            
-            # Save profile file if provided
-            if profile:
-                with open(profile_path, "wb") as f:
-                    shutil.copyfileobj(profile.file, f)
-                logger.info(f"Saved profile file to: {profile_path}")
-            
-            # Verify template exists
-            template_path = "Template.xlsm"
-            if not os.path.exists(template_path):
-                raise FileNotFoundError(f"Template file not found: {os.path.abspath(template_path)}")
-            
-            # Load template
-            output_wb = load_workbook(template_path, data_only=False, keep_vba=True)
-            logger.info("Loaded template workbook")
-            
-            # Remove existing sheets except "DCF Model"
-            for sheet_name in list(output_wb.sheetnames):
-                if sheet_name != "DCF Model":
-                    output_wb.remove(output_wb[sheet_name])
-            logger.info("Cleaned template sheets")
-            
-            # Process consensus file
-            try:
-                consensus_wb = load_workbook(consensus_path)
-                for sheet_name in consensus_wb.sheetnames:
-                    if sheet_name == "DCF Model":
-                        continue
-                    source_sheet = consensus_wb[sheet_name]
-                    copy_sheet(source_sheet, output_wb, sheet_name)
-                logger.info("Processed consensus file")
-            except (BadZipFile, InvalidFileException) as e:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid consensus file. Please upload a valid Excel (.xlsx) file."
-                )
-            
-            # Process profile file if provided
-            if profile and profile_path and os.path.exists(profile_path):
-                try:
-                    profile_wb = load_workbook(profile_path)
-                    for sheet_name in profile_wb.sheetnames:
-                        if sheet_name == "DCF Model":
-                            continue
-                        source_sheet = profile_wb[sheet_name]
-                        copy_sheet(source_sheet, output_wb, sheet_name)
-                    logger.info("Processed profile file")
-                except (BadZipFile, InvalidFileException) as e:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Invalid profile file. Please upload a valid Excel (.xlsx) file."
-                    )
-            
-            # Save output
-            output_wb.save(output_path)
-            logger.info(f"Saved output to: {output_path}")
-            
-            # Return response
-            return StreamingResponse(
-                open(output_path, "rb"),
-                media_type="application/vnd.ms-excel.sheet.macroEnabled.12",
-                headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsm"},
-            )
-            
-        except HTTPException:
-            # Re-raise our custom HTTP exceptions
-            raise
-        except Exception as e:
-            logger.error(f"Processing error: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e))
+        # Remove existing sheets except "DCF Model"
+        for sheet_name in list(output_wb.sheetnames):
+            if sheet_name != "DCF Model":
+                output_wb.remove(output_wb[sheet_name])
+        
+        # Load user's consensus file
+        consensus_wb = load_workbook(consensus_path)
+        
+        # Copy all sheets from consensus file (except "DCF Model")
+        for sheet_name in consensus_wb.sheetnames:
+            if sheet_name == "DCF Model":
+                continue
+            source_sheet = consensus_wb[sheet_name]
+            copy_sheet(source_sheet, output_wb, sheet_name)
+        
+        # Save as macro-enabled workbook
+        with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
+            output_wb.save(temp_file.name)
+            temp_file_path = temp_file.name
+        
+        return StreamingResponse(
+            open(temp_file_path, "rb"),
+            media_type="application/vnd.ms-excel.sheet.macroEnabled.12",
+            headers={"Content-Disposition": "attachment; filename=DCF_Model.xlsm"},
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        # Clean up temporary files
+        for path in [consensus_path, profile_path, temp_file_path]:
+            if path and os.path.exists(path):
+                os.remove(path)
