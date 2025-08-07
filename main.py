@@ -69,43 +69,67 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
         with open(consensus_path, "wb") as f:
             shutil.copyfileobj(consensus.file, f)
             
+        # CODE A: Handle when profile is provided
         if profile:
             profile_path = "temp_profile.xlsx"
             with open(profile_path, "wb") as f:
                 shutil.copyfileobj(profile.file, f)
 
-        # Load macro-enabled template as output workbook
-        output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
-        
-        # Remove existing sheets except "DCF Model"
-        for sheet_name in list(output_wb.sheetnames):
-            if sheet_name != "DCF Model":
-                output_wb.remove(output_wb[sheet_name])
-        
-        # Load user's consensus file
-        consensus_wb = load_workbook(consensus_path)
-        
-        # Copy all sheets from consensus file (except "DCF Model")
-        for sheet_name in consensus_wb.sheetnames:
-            if sheet_name == "DCF Model":
-                continue
-            source_sheet = consensus_wb[sheet_name]
-            copy_sheet(source_sheet, output_wb, sheet_name)
-        
-        # CODE A: Handle profile file if provided
-        if profile:  # Explicit check if profile file was uploaded
+            # Load macro-enabled template as output workbook
+            output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
+            
+            # Remove existing sheets except "DCF Model"
+            for sheet_name in list(output_wb.sheetnames):
+                if sheet_name != "DCF Model":
+                    output_wb.remove(output_wb[sheet_name])
+            
+            # Load user's consensus file
+            consensus_wb = load_workbook(consensus_path)
+            
+            # Copy all sheets from consensus file (except "DCF Model")
+            for sheet_name in consensus_wb.sheetnames:
+                if sheet_name == "DCF Model":
+                    continue
+                source_sheet = consensus_wb[sheet_name]
+                copy_sheet(source_sheet, output_wb, sheet_name)
+            
+            # Handle profile file
             profile_wb = load_workbook(profile_path)
             for sheet_name in profile_wb.sheetnames:
                 if sheet_name == "DCF Model":
                     continue
                 source_sheet = profile_wb[sheet_name]
                 copy_sheet(source_sheet, output_wb, sheet_name)
-        # CODE B: No action needed when profile is not provided
+            
+            # Save as macro-enabled workbook
+            with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
+                output_wb.save(temp_file.name)
+                temp_file_path = temp_file.name
         
-        # Save as macro-enabled workbook
-        with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
-            output_wb.save(temp_file.name)
-            temp_file_path = temp_file.name
+        # CODE B: Handle when only consensus is provided
+        else:
+            # Load macro-enabled template as output workbook
+            output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
+            
+            # Remove existing sheets except "DCF Model"
+            for sheet_name in list(output_wb.sheetnames):
+                if sheet_name != "DCF Model":
+                    output_wb.remove(output_wb[sheet_name])
+            
+            # Load user's consensus file
+            consensus_wb = load_workbook(consensus_path)
+            
+            # Copy all sheets from consensus file (except "DCF Model")
+            for sheet_name in consensus_wb.sheetnames:
+                if sheet_name == "DCF Model":
+                    continue
+                source_sheet = consensus_wb[sheet_name]
+                copy_sheet(source_sheet, output_wb, sheet_name)
+            
+            # Save as macro-enabled workbook
+            with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
+                output_wb.save(temp_file.name)
+                temp_file_path = temp_file.name
         
         return StreamingResponse(
             open(temp_file_path, "rb"),
