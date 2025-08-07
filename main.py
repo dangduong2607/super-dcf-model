@@ -61,6 +61,39 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
     
     return new_sheet
 
+def apply_formatting(source_sheet, target_sheet):
+    """Apply formatting from source_sheet to target_sheet"""
+    # Copy column dimensions
+    for col in range(1, source_sheet.max_column + 1):
+        col_letter = get_column_letter(col)
+        if col_letter in source_sheet.column_dimensions:
+            target_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
+    
+    # Copy row dimensions
+    for row in range(1, source_sheet.max_row + 1):
+        if row in source_sheet.row_dimensions:
+            target_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+    
+    # Unmerge all cells in target first
+    target_sheet.unmerge_cells()
+    # Copy merged cells
+    for merged_range in source_sheet.merged_cells.ranges:
+        target_sheet.merge_cells(str(merged_range))
+    
+    # Copy cell styles
+    for row in source_sheet.iter_rows():
+        for cell in row:
+            target_cell = target_sheet.cell(row=cell.row, column=cell.column)
+            if cell.has_style:
+                target_cell.font = cell.font.copy()
+                target_cell.border = cell.border.copy()
+                target_cell.fill = cell.fill.copy()
+                target_cell.number_format = cell.number_format
+                target_cell.protection = cell.protection.copy()
+                target_cell.alignment = cell.alignment.copy()
+    
+    return target_sheet
+
 @app.post("/upload")
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
     consensus_path = "temp_consensus.xlsx"
@@ -79,16 +112,32 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
         # Load user's consensus file
         output_wb = load_workbook(consensus_path)
         
-        # Load template DCF Model
-        template_wb = load_workbook("Template.xlsx", data_only=False)
-        dcf_sheet = template_wb["DCF Model"]
-        
-        # Copy DCF Model to output workbook
-        new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
+        # Load template and format workbooks
+        template_wb = None
+        format_wb = None
+        try:
+            # Load template DCF Model
+            template_wb = load_workbook("Template.xlsx", data_only=False)
+            dcf_sheet = template_wb["DCF Model"]
+            
+            # Copy DCF Model to output workbook
+            new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
+            
+            # Load Format DCF Model and apply formatting
+            format_wb = load_workbook("Format DCF Model.xlsx", data_only=False)
+            format_sheet = format_wb["Format DCF Model"]
+            apply_formatting(format_sheet, new_dcf_sheet)
+        finally:
+            # Close workbooks to release resources
+            if template_wb:
+                template_wb.close()
+            if format_wb:
+                format_wb.close()
         
         # Save combined workbook
         temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
         output_wb.save(temp_file.name)
+        output_wb.close()  # Close output workbook
         
         return StreamingResponse(
             open(temp_file.name, "rb"),
