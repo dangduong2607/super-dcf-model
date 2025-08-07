@@ -67,35 +67,29 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     profile_path = None
     
     try:
-        # Save uploaded consensus file
+        # Save uploaded files
         with open(consensus_path, "wb") as f:
             shutil.copyfileobj(consensus.file, f)
             
-        # Save optional profile file
         if profile:
             profile_path = "temp_profile.xlsx"
             with open(profile_path, "wb") as f:
                 shutil.copyfileobj(profile.file, f)
 
-        # Load user's consensus workbook
+        # Load user's consensus file
         output_wb = load_workbook(consensus_path)
-
-        # Load DCF Model from template
+        
+        # Load template DCF Model
         template_wb = load_workbook("Template.xlsx", data_only=False)
         dcf_sheet = template_wb["DCF Model"]
-        copy_sheet(dcf_sheet, output_wb, "DCF Model")
-
-        # If profile file is uploaded, append its first sheet
-        if profile_path:
-            profile_wb = load_workbook(profile_path, data_only=False)
-            profile_sheet = profile_wb.active
-            profile_sheet_name = profile_sheet.title
-            copy_sheet(profile_sheet, output_wb, f"Profile - {profile_sheet_name}")
-
-        # Save combined workbook to temp file
+        
+        # Copy DCF Model to output workbook
+        new_dcf_sheet = copy_sheet(dcf_sheet, output_wb, "DCF Model")
+        
+        # Save combined workbook
         temp_file = NamedTemporaryFile(delete=False, suffix=".xlsx")
         output_wb.save(temp_file.name)
-
+        
         return StreamingResponse(
             open(temp_file.name, "rb"),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -106,6 +100,7 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
+        # Clean up temporary files
         for path in [consensus_path, profile_path]:
             if path and os.path.exists(path):
                 os.remove(path)
