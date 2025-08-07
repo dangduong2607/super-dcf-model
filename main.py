@@ -18,43 +18,51 @@ app.add_middleware(
 )
 
 def copy_sheet(source_sheet, target_wb, sheet_name):
-    """Copy a sheet with all formatting, formulas, and dimensions"""
+    """Copy a sheet with all formatting, formulas, and dimensions for a fixed range"""
     new_sheet = target_wb.create_sheet(sheet_name)
     
-    # Copy column dimensions
-    for col in range(1, source_sheet.max_column + 1):
+    # Copy column dimensions for all columns (1-500)
+    for col in range(1, 501):
         col_letter = get_column_letter(col)
-        new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
+        # Get width if exists, otherwise use default
+        if col_letter in source_sheet.column_dimensions:
+            new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
     
-    # Copy row dimensions
-    for row in range(1, source_sheet.max_row + 1):
-        new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+    # Copy row dimensions for all rows (1-500)
+    for row in range(1, 501):
+        # Get height if exists, otherwise use default
+        if row in source_sheet.row_dimensions:
+            new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
     
     # Copy merged cells
     for merged_range in source_sheet.merged_cells.ranges:
         new_sheet.merge_cells(str(merged_range))
     
-    # Copy cells with values, formulas, and formatting
-    for row in source_sheet.iter_rows():
-        for cell in row:
-            new_cell = new_sheet.cell(
-                row=cell.row,
-                column=cell.column,
-                value=cell.value
-            )
+    # Copy cells with values, formulas, and formatting for fixed range
+    for row in range(1, 501):
+        for col in range(1, 501):
+            # Get cell if exists
+            if row <= source_sheet.max_row and col <= source_sheet.max_column:
+                cell = source_sheet.cell(row=row, column=col)
+            else:
+                # Create empty cell with default formatting
+                cell = source_sheet.cell(row=row, column=col)
+            
+            new_cell = new_sheet.cell(row=row, column=col, value=cell.value)
             
             # Preserve formulas
             if cell.data_type == 'f':
                 new_cell.value = cell.value
             
-            # Copy all styling attributes
-            if cell.has_style:
-                new_cell.font = cell.font.copy()
-                new_cell.border = cell.border.copy()
-                new_cell.fill = cell.fill.copy()
-                new_cell.number_format = cell.number_format
-                new_cell.protection = cell.protection.copy()
-                new_cell.alignment = cell.alignment.copy()
+            # Always copy styling attributes if cell exists in source
+            if row <= source_sheet.max_row and col <= source_sheet.max_column:
+                if cell.has_style:
+                    new_cell.font = cell.font.copy()
+                    new_cell.border = cell.border.copy()
+                    new_cell.fill = cell.fill.copy()
+                    new_cell.number_format = cell.number_format
+                    new_cell.protection = cell.protection.copy()
+                    new_cell.alignment = cell.alignment.copy()
     
     return new_sheet
 
