@@ -62,7 +62,7 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
 async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(None)):
     consensus_path = "temp_consensus.xlsx"
     profile_path = None
-    temp_file_path = None  # Initialize temp_file_path
+    temp_file_path = None
     
     try:
         # Save uploaded files
@@ -91,6 +91,15 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
                 continue
             source_sheet = consensus_wb[sheet_name]
             copy_sheet(source_sheet, output_wb, sheet_name)
+        
+        # Handle profile file if provided
+        if profile_path:
+            profile_wb = load_workbook(profile_path)
+            for sheet_name in profile_wb.sheetnames:
+                if sheet_name == "DCF Model":
+                    continue
+                source_sheet = profile_wb[sheet_name]
+                copy_sheet(source_sheet, output_wb, sheet_name)
         
         # Save as macro-enabled workbook
         with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
