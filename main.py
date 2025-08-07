@@ -37,21 +37,15 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
     # Copy cells with values, formulas, and formatting
     for row in source_sheet.iter_rows():
         for cell in row:
-            # Handle array formulas (spilled ranges) correctly
-            if cell.data_type == 'f' and cell.value.startswith('{=') and cell.value.endswith('}'):
-                # Remove curly braces from array formulas
-                formula = cell.value[1:-1]
-                new_cell = new_sheet.cell(
-                    row=cell.row,
-                    column=cell.column,
-                    value=formula
-                )
-            else:
-                new_cell = new_sheet.cell(
-                    row=cell.row,
-                    column=cell.column,
-                    value=cell.value
-                )
+            new_cell = new_sheet.cell(
+                row=cell.row,
+                column=cell.column,
+                value=cell.value
+            )
+            
+            # Preserve formulas
+            if cell.data_type == 'f':
+                new_cell.value = cell.value
             
             # Copy all styling attributes
             if cell.has_style:
