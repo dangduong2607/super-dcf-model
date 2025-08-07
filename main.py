@@ -18,39 +18,31 @@ app.add_middleware(
 )
 
 def copy_sheet(source_sheet, target_wb, sheet_name):
-    """Copy a sheet with all formatting, formulas, and dimensions"""
     new_sheet = target_wb.create_sheet(sheet_name)
-    
-    # Copy column dimensions
+
     for col in range(1, source_sheet.max_column + 1):
         col_letter = get_column_letter(col)
         new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
-    
-    # Copy row dimensions
+
     for row in range(1, source_sheet.max_row + 1):
         new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
-    
-    # Copy merged cells
+
     for merged_range in source_sheet.merged_cells.ranges:
         new_sheet.merge_cells(str(merged_range))
-    
-    # Copy cells with values, formulas, and formatting
+
     for row in source_sheet.iter_rows():
         for cell in row:
-            new_cell = new_sheet.cell(
-                row=cell.row,
-                column=cell.column,
-                value=cell.value
-            )
-            
-            # Preserve formulas and remove {= } if it's a legacy array formula
+            new_cell = new_sheet.cell(row=cell.row, column=cell.column)
+
+            # Handle formula (strip legacy array syntax)
             if cell.data_type == 'f' and isinstance(cell.value, str):
                 formula = cell.value
                 if formula.startswith("{=") and formula.endswith("}"):
                     formula = "=" + formula[2:-1]
                 new_cell.value = formula
-            
-            # Copy all styling attributes
+            else:
+                new_cell.value = cell.value
+
             if cell.has_style:
                 new_cell.font = cell.font.copy()
                 new_cell.border = cell.border.copy()
@@ -58,7 +50,7 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
                 new_cell.number_format = cell.number_format
                 new_cell.protection = cell.protection.copy()
                 new_cell.alignment = cell.alignment.copy()
-    
+
     return new_sheet
 
 @app.post("/upload")
