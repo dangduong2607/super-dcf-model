@@ -43,9 +43,12 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
                 value=cell.value
             )
             
-            # Preserve formulas
-            if cell.data_type == 'f':
-                new_cell.value = cell.value
+            # Preserve formulas and remove {= } if it's a legacy array formula
+            if cell.data_type == 'f' and isinstance(cell.value, str):
+                formula = cell.value
+                if formula.startswith("{=") and formula.endswith("}"):
+                    formula = "=" + formula[2:-1]
+                new_cell.value = formula
             
             # Copy all styling attributes
             if cell.has_style:
