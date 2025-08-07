@@ -24,11 +24,13 @@ def copy_sheet(source_sheet, target_wb, sheet_name):
     # Copy column dimensions
     for col in range(1, source_sheet.max_column + 1):
         col_letter = get_column_letter(col)
-        new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
+        if col_letter in source_sheet.column_dimensions:
+            new_sheet.column_dimensions[col_letter].width = source_sheet.column_dimensions[col_letter].width
     
     # Copy row dimensions
     for row in range(1, source_sheet.max_row + 1):
-        new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
+        if row in source_sheet.row_dimensions:
+            new_sheet.row_dimensions[row].height = source_sheet.row_dimensions[row].height
     
     # Copy merged cells
     for merged_range in source_sheet.merged_cells.ranges:
@@ -65,71 +67,45 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
     temp_file_path = None
     
     try:
-        # Save uploaded files
+        # Save consensus file
         with open(consensus_path, "wb") as f:
             shutil.copyfileobj(consensus.file, f)
             
-        # CODE A: Handle when profile is provided
-        if profile:
+        # Save profile file if provided
+        if profile is not None:
             profile_path = "temp_profile.xlsx"
             with open(profile_path, "wb") as f:
                 shutil.copyfileobj(profile.file, f)
 
-            # Load macro-enabled template as output workbook
-            output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
-            
-            # Remove existing sheets except "DCF Model"
-            for sheet_name in list(output_wb.sheetnames):
-                if sheet_name != "DCF Model":
-                    output_wb.remove(output_wb[sheet_name])
-            
-            # Load user's consensus file
-            consensus_wb = load_workbook(consensus_path)
-            
-            # Copy all sheets from consensus file (except "DCF Model")
-            for sheet_name in consensus_wb.sheetnames:
-                if sheet_name == "DCF Model":
-                    continue
-                source_sheet = consensus_wb[sheet_name]
-                copy_sheet(source_sheet, output_wb, sheet_name)
-            
-            # Handle profile file
+        # Load macro-enabled template
+        output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
+        
+        # Remove existing sheets except "DCF Model"
+        for sheet_name in list(output_wb.sheetnames):
+            if sheet_name != "DCF Model":
+                output_wb.remove(output_wb[sheet_name])
+        
+        # Process consensus file
+        consensus_wb = load_workbook(consensus_path)
+        for sheet_name in consensus_wb.sheetnames:
+            if sheet_name == "DCF Model":
+                continue
+            source_sheet = consensus_wb[sheet_name]
+            copy_sheet(source_sheet, output_wb, sheet_name)
+        
+        # Process profile file if provided
+        if profile is not None and profile_path is not None:
             profile_wb = load_workbook(profile_path)
             for sheet_name in profile_wb.sheetnames:
                 if sheet_name == "DCF Model":
                     continue
                 source_sheet = profile_wb[sheet_name]
                 copy_sheet(source_sheet, output_wb, sheet_name)
-            
-            # Save as macro-enabled workbook
-            with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
-                output_wb.save(temp_file.name)
-                temp_file_path = temp_file.name
         
-        # CODE B: Handle when only consensus is provided
-        else:
-            # Load macro-enabled template as output workbook
-            output_wb = load_workbook("Template.xlsm", data_only=False, keep_vba=True)
-            
-            # Remove existing sheets except "DCF Model"
-            for sheet_name in list(output_wb.sheetnames):
-                if sheet_name != "DCF Model":
-                    output_wb.remove(output_wb[sheet_name])
-            
-            # Load user's consensus file
-            consensus_wb = load_workbook(consensus_path)
-            
-            # Copy all sheets from consensus file (except "DCF Model")
-            for sheet_name in consensus_wb.sheetnames:
-                if sheet_name == "DCF Model":
-                    continue
-                source_sheet = consensus_wb[sheet_name]
-                copy_sheet(source_sheet, output_wb, sheet_name)
-            
-            # Save as macro-enabled workbook
-            with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
-                output_wb.save(temp_file.name)
-                temp_file_path = temp_file.name
+        # Save output
+        with NamedTemporaryFile(delete=False, suffix=".xlsm") as temp_file:
+            output_wb.save(temp_file.name)
+            temp_file_path = temp_file.name
         
         return StreamingResponse(
             open(temp_file_path, "rb"),
@@ -138,10 +114,15 @@ async def upload(consensus: UploadFile = File(...), profile: UploadFile = File(N
         )
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # Print detailed error to console
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
-        # Clean up temporary files
+        # Clean up temporary files safely
         for path in [consensus_path, profile_path, temp_file_path]:
             if path and os.path.exists(path):
-                os.remove(path)
+                try:
+                    os.remove(path)
+                except:
+                    pass  # Ignore errors during cleanup
