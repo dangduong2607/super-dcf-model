@@ -20,14 +20,14 @@
       --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
       --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
-
+ 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
       font-family: 'Inter', sans-serif;
     }
-
+ 
     body {
       background: var(--background);
       color: var(--text);
@@ -39,7 +39,7 @@
       padding: 2rem;
       line-height: 1.6;
     }
-
+ 
     .container {
       background: var(--card-bg);
       padding: 2.5rem;
@@ -50,7 +50,7 @@
       position: relative;
       overflow: hidden;
     }
-
+ 
     .container::before {
       content: '';
       position: absolute;
@@ -60,7 +60,7 @@
       height: 8px;
       background: linear-gradient(90deg, var(--primary), var(--secondary));
     }
-
+ 
     h1 {
       text-align: center;
       font-size: 1.8rem;
@@ -73,18 +73,18 @@
       justify-content: center;
       gap: 0.5rem;
     }
-
+ 
     h1 i {
       color: var(--primary);
     }
-
+ 
     .subtitle {
       text-align: center;
       color: var(--text-light);
       margin-bottom: 1rem;
       font-size: 0.95rem;
     }
-
+ 
     .note {
       text-align: center;
       color: var(--text-light);
@@ -95,11 +95,11 @@
       background-color: rgba(67, 97, 238, 0.05);
       border-radius: 4px;
     }
-
+ 
     .form-group {
       margin-bottom: 1.5rem;
     }
-
+ 
     label {
       display: block;
       font-weight: 500;
@@ -107,11 +107,11 @@
       color: var(--text);
       font-size: 0.95rem;
     }
-
+ 
     .file-input-container {
       position: relative;
     }
-
+ 
     .file-input-label {
       display: flex;
       align-items: center;
@@ -123,17 +123,17 @@
       cursor: pointer;
       transition: var(--transition);
     }
-
+ 
     .file-input-label:hover {
       border-color: var(--primary);
       background: rgba(67, 97, 238, 0.05);
     }
-
+ 
     .file-input-label i {
       color: var(--primary);
       font-size: 1.2rem;
     }
-
+ 
     .file-input-text {
       flex: 1;
       margin-left: 1rem;
@@ -143,7 +143,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-
+ 
     input[type="file"] {
       position: absolute;
       width: 1px;
@@ -154,7 +154,7 @@
       clip: rect(0, 0, 0, 0);
       border: 0;
     }
-
+ 
     button {
       width: 100%;
       padding: 1rem;
@@ -172,20 +172,20 @@
       gap: 0.5rem;
       margin-top: 0.5rem;
     }
-
+ 
     button:hover {
       background: var(--primary-dark);
       transform: translateY(-1px);
     }
-
+ 
     button:active {
       transform: translateY(0);
     }
-
+ 
     button i {
       font-size: 1.1rem;
     }
-
+ 
     #downloadLink {
       display: none;
       margin-top: 1.5rem;
@@ -199,26 +199,26 @@
       transition: var(--transition);
       border: 1px solid rgba(76, 201, 240, 0.3);
     }
-
+ 
     #downloadLink:hover {
       background: rgba(76, 201, 240, 0.2);
     }
-
+ 
     #downloadLink i {
       margin-right: 0.5rem;
     }
-
+ 
     .loading {
       display: none;
       text-align: center;
       margin: 1rem 0;
       color: var(--text-light);
     }
-
+ 
     .loading i {
       animation: spin 1s linear infinite;
     }
-
+ 
     .profile-section {
       margin-top: 2rem;
       padding-top: 1.5rem;
@@ -227,52 +227,53 @@
       align-items: center;
       gap: 1rem;
     }
-
+ 
     .profile-image {
       width: 60px;
       height: 60px;
       border-radius: 50%;
       object-fit: cover;
       border: 2px solid var(--border);
+      flex-shrink: 0;
     }
-
+ 
     .profile-info {
       flex: 1;
     }
-
+ 
     .profile-name {
       font-weight: 600;
       margin-bottom: 0.25rem;
     }
-
+ 
     .profile-title {
       font-size: 0.85rem;
       color: var(--text-light);
       margin-bottom: 0.5rem;
     }
-
+ 
     .profile-links {
       display: flex;
       gap: 0.75rem;
     }
-
+ 
     .profile-links a {
       color: var(--primary);
       font-size: 0.9rem;
       text-decoration: none;
       transition: var(--transition);
     }
-
+ 
     .profile-links a:hover {
       color: var(--primary-dark);
       text-decoration: underline;
     }
-
+ 
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-
+ 
     @media (max-width: 600px) {
       .container {
         padding: 1.5rem;
@@ -281,12 +282,12 @@
       h1 {
         font-size: 1.5rem;
       }
-
+ 
       .profile-section {
         flex-direction: column;
         text-align: center;
       }
-
+ 
       .profile-links {
         justify-content: center;
       }
@@ -316,22 +317,29 @@
           <i class="fas fa-info-circle"></i> Include both files in a single Excel workbook
         </div>
       </div>
-
+ 
       <button type="submit">
         <i class="fas fa-magic"></i> Generate DCF Model
       </button>
     </form>
-
+ 
     <div class="loading" id="loading">
       <i class="fas fa-spinner"></i> Processing your file...
     </div>
-
+ 
     <a id="downloadLink" class="download-btn">
       <i class="fas fa-download"></i> Download DCF Model
     </a>
-
+ 
     <div class="profile-section">
-      <img src="https://media.licdn.com/dms/image/v2/C5603AQG8Jczd7eEl2A/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/1650615669071?e=1775692800&v=beta&t=raF1qv9HwaGmMiFbgfgMLonsaHEKNPFP_6IQ_16AxuI" alt="Dang Duong Nguyen" class="profile-image">
+      <img
+        src="https://i.imgur.com/Y8dIT36.jpeg"
+        alt="Dang Duong Nguyen"
+        class="profile-image"
+        referrerpolicy="no-referrer"
+        crossorigin="anonymous"
+        onerror="this.onerror=null; this.src='https://imgur.com/Y8dIT36.jpg';"
+      >
       <div class="profile-info">
         <div class="profile-name">Dang Duong Nguyen</div>
         <div class="profile-title">Finance Professional & Developer</div>
@@ -343,34 +351,34 @@
       </div>
     </div>
   </div>
-
+ 
   <script>
     // Update file name display when file is selected
     document.getElementById('consensus').addEventListener('change', function(e) {
       const fileName = e.target.files[0] ? e.target.files[0].name : 'Consensus File (Required) and Profile (Optional)';
       document.getElementById('consensusFileName').textContent = fileName;
     });
-
+ 
     document.getElementById('uploadForm').onsubmit = async function(e) {
       e.preventDefault();
       const formData = new FormData(this);
       const loading = document.getElementById('loading');
       const downloadLink = document.getElementById('downloadLink');
-
+ 
       // Show loading state
       loading.style.display = 'block';
       downloadLink.style.display = 'none';
-
+ 
       try {
         const response = await fetch('https://dcf-backend-hjku.onrender.com/upload', {
           method: 'POST',
           body: formData
         });
-
+ 
         if (!response.ok) {
           throw new Error('Server responded with an error');
         }
-
+ 
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         downloadLink.href = url;
@@ -385,3 +393,4 @@
   </script>
 </body>
 </html>
+ 
